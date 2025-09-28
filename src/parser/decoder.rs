@@ -3,7 +3,6 @@ use tokio_util::codec::Decoder;
 use super::*;
 
 /// RESP value parser that works as a tokio decoder
-#[derive(Default)]
 pub struct RespParser;
 
 impl Decoder for RespParser {
@@ -14,6 +13,11 @@ impl Decoder for RespParser {
         if buf.is_empty() {
             return Ok(None);
         }
+
+        println!(
+            "\nReceived raw value: {}",
+            String::from_utf8_lossy(buf).escape_debug()
+        );
 
         match data::parse(buf, 0)? {
             Some((window, next_pos)) => {

@@ -12,8 +12,6 @@ pub fn parse(buf: &BytesMut, pos: usize) -> RedisParseResult {
         return Ok(None);
     }
 
-    println!("{}", String::from_utf8_lossy(buf).escape_debug());
-
     match buf[pos] {
         b'+' => simple_string(buf, pos + 1),
         b'-' => error(buf, pos + 1),
@@ -37,12 +35,12 @@ pub fn bulk_string(buf: &BytesMut, pos: usize) -> RedisParseResult {
         Some((-1, next_pos)) => Ok(Some((RedisValueRef::NulString, next_pos))),
         Some((len, next_pos)) => {
             let end_pos = next_pos + len as usize;
-            if buf.len() < end_pos + 2 {
+            if buf.len() < end_pos + constants::CRLF_LEN {
                 Ok(None)
             } else {
                 Ok(Some((
                     RedisValueRef::String(BufWindow(next_pos, end_pos)),
-                    end_pos + 2,
+                    end_pos + constants::CRLF_LEN,
                 )))
             }
         }
@@ -65,7 +63,7 @@ pub fn array(buf: &BytesMut, pos: usize) -> RedisParseResult {
             let mut elems = Vec::with_capacity(len as usize);
             let mut current_pos = next_pos;
             for _ in 0..len {
-                let Some((elem, next_pos)) = parse(buf, next_pos)? else {
+                let Some((elem, next_pos)) = parse(buf, current_pos)? else {
                     return Ok(None);
                 };
                 elems.push(elem);

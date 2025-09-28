@@ -3,11 +3,14 @@
 //! For more info, see [this article](https://dpbriggs.ca/blog/Implementing-A-Copyless-Redis-Protocol-in-Rust-With-Parsing-Combinators)
 
 mod base;
+mod constants;
 mod data;
 mod decoder;
+mod encoder;
 mod errors;
 
 pub use decoder::RespParser;
+pub use encoder::RespEncoder;
 pub use errors::RedisParseError;
 
 use bytes::{Bytes, BytesMut};
@@ -18,6 +21,7 @@ use memchr::memchr;
 #[derive(Debug)]
 pub enum RedisValue {
     String(Str),
+    SimpleString(Str),
     Error(Str),
     Int(i64),
     Array(Vec<RedisValue>),

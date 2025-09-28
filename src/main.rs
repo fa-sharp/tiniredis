@@ -2,14 +2,19 @@ mod parser;
 mod request;
 mod response;
 
+use anyhow::Context;
+use futures::{SinkExt, Stream, TryStreamExt};
 use tokio::{
-    io::{AsyncWriteExt, BufWriter},
+    io::{AsyncWrite, BufWriter},
     net::{TcpListener, TcpStream},
 };
-use tokio_stream::StreamExt;
-use tokio_util::codec::FramedRead;
+use tokio_util::codec::{FramedRead, FramedWrite};
 
-use crate::{parser::RespParser, request::parse_command, response::process_command};
+use crate::{
+    parser::{RedisParseError, RespEncoder, RespParser},
+    request::parse_command,
+    response::process_command,
+};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -26,35 +31,34 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn process(mut socket: TcpStream) -> anyhow::Result<()> {
+async fn process(mut socket: TcpStream) {
     let (reader, writer) = socket.split();
     let mut framed_reader = FramedRead::new(reader, RespParser);
-    let mut response_writer = BufWriter::new(writer);
+    let mut response_writer = FramedWrite::new(BufWriter::new(writer), RespEncoder);
 
-    while let Some(res) = framed_reader.next().await {
-        let value = match res {
-            Ok(value) => value,
-            Err(e) => {
-                eprintln!("Error parsing value: {e}");
-                continue;
-            }
-        };
-        println!("Received value {:?}", value);
-        let command = match parse_command(value) {
-            request::ParsedCommand::Command(command) => command,
-            request::ParsedCommand::NotEnoughBytes => todo!(),
-        };
+    if let Err(e) = inner_process(&mut framed_reader, &mut response_writer).await {
+        eprintln!("Error processing request: {e}");
+    };
 
-        let response = process_command(&command);
-        println!(
-            "Sending response:\n{}\n",
-            String::from_utf8_lossy(response).escape_debug()
-        );
+    response_writer.flush().await.ok();
+}
 
-        if let Err(e) = response_writer.write_all(response).await {
-            eprintln!("Error sending last response: {e}\n")
-        }
-        response_writer.flush().await.ok();
+async fn inner_process<R, W>(
+    mut reader: R,
+    writer: &mut FramedWrite<W, RespEncoder>,
+) -> anyhow::Result<()>
+where
+    R: Stream<Item = Result<parser::RedisValue, RedisParseError>> + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    while let Some(value) = reader.try_next().await.context("parse request")? {
+        println!("Received value: {:?}", value);
+        let command = parse_command(value)?;
+
+        let response = process_command(command);
+        println!("Sending response: {:?}", response);
+
+        writer.send(response).await.context("write response")?;
     }
 
     Ok(())

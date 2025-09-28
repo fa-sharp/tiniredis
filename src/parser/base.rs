@@ -14,7 +14,7 @@ pub fn word(buf: &BytesMut, pos: usize) -> Option<(BufWindow, usize)> {
         let end_pos = pos + crlf_pos - 1;
         let split = BufWindow(pos, end_pos);
 
-        Some((split, end_pos + 2))
+        Some((split, end_pos + constants::CRLF_LEN))
     } else {
         None
     }
