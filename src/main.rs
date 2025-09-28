@@ -21,13 +21,18 @@ async fn main() -> anyhow::Result<()> {
 async fn process(socket: TcpStream) -> anyhow::Result<()> {
     let mut connection = BufWriter::new(socket);
 
-    let c = connection.read_u8().await?;
-    println!("Received '{c}'");
-
-    if let Err(e) = connection.write_all(b"+PONG\r\n").await {
-        eprintln!("Error sending response: {e}")
+    let mut buf = [0; 512];
+    loop {
+        let n = connection.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        println!("Received {n} bytes");
+        if let Err(e) = connection.write_all(b"+PONG\r\n").await {
+            eprintln!("Error sending response: {e}")
+        }
+        connection.flush().await?;
     }
-    connection.flush().await?;
 
     Ok(())
 }
