@@ -30,12 +30,14 @@ pub enum RedisValue {
 }
 
 impl RedisValue {
+    /// If value is a string, get the bytes
     pub fn as_bytes(&self) -> Option<&Bytes> {
         match self {
             RedisValue::String(bytes) | RedisValue::SimpleString(bytes) => Some(bytes),
             _ => None,
         }
     }
+    /// If value is a string, turn into owned bytes
     pub fn into_bytes(self) -> Option<Bytes> {
         match self {
             RedisValue::String(bytes) | RedisValue::SimpleString(bytes) => Some(bytes),

@@ -19,6 +19,7 @@ pub enum Command {
     RPush {
         key: Bytes,
         elem: Bytes,
+        elems: Vec<Bytes>,
     },
 }
 
@@ -30,19 +31,19 @@ impl Command {
         let command = match args.command() {
             "PING" => Self::Ping,
             "ECHO" => {
-                let message = args.pop_arg("message")?;
+                let message = args.pop("message")?;
                 Self::Echo { message }
             }
             "GET" => {
-                let key = args.pop_arg("key")?;
+                let key = args.pop("key")?;
                 Self::Get { key }
             }
             "SET" => {
-                let key = args.pop_arg("key")?;
-                let val = args.pop_arg("value")?;
+                let key = args.pop("key")?;
+                let val = args.pop("value")?;
 
-                let ex = args.optional_named_arg("EX");
-                let px = args.optional_named_arg("PX");
+                let ex = args.optional_named("EX");
+                let px = args.optional_named("PX");
                 let ttl = match (ex, px) {
                     (None, None) => None,
                     (Some(ex), None) => Some(
@@ -57,10 +58,15 @@ impl Command {
                 Self::Set { key, val, ttl }
             }
             "RPUSH" => {
-                let key = args.pop_arg("key")?;
-                let elem = args.pop_arg("element")?;
+                let key = args.pop("key")?;
+                let elem = args.pop("element")?;
 
-                Self::RPush { key, elem }
+                let mut elems = Vec::new();
+                while let Some(elem) = args.pop_optional() {
+                    elems.push(elem);
+                }
+
+                Self::RPush { key, elem, elems }
             }
             _ => bail!("Unrecognized command"),
         };
@@ -81,7 +87,7 @@ impl Command {
                 storage.set(key, val, ttl);
                 RedisValue::SimpleString(Bytes::from_static(b"OK"))
             }
-            Command::RPush { key, elem } => match storage.rpush(key, elem) {
+            Command::RPush { key, elem, elems } => match storage.rpush(key, elem, elems) {
                 Ok(len) => RedisValue::Int(len),
                 Err(bytes) => RedisValue::Error(bytes),
             },

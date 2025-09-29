@@ -24,7 +24,7 @@ pub enum RedisDataType {
 pub trait Storage {
     fn get(&self, key: &Bytes) -> Option<Bytes>;
     fn set(&mut self, key: Bytes, val: Bytes, ttl_millis: Option<u64>);
-    fn rpush(&mut self, key: Bytes, elem: Bytes) -> Result<i64, Bytes>;
+    fn rpush(&mut self, key: Bytes, elem: Bytes, elems: Vec<Bytes>) -> Result<i64, Bytes>;
     fn cleanup(&mut self);
 }
 
@@ -49,7 +49,7 @@ impl Storage for MemoryStorage {
         self.data.insert(key, object);
     }
 
-    fn rpush(&mut self, key: Bytes, elem: Bytes) -> Result<i64, Bytes> {
+    fn rpush(&mut self, key: Bytes, elem: Bytes, elems: Vec<Bytes>) -> Result<i64, Bytes> {
         let entry = self
             .data
             .entry(key)
@@ -61,6 +61,7 @@ impl Storage for MemoryStorage {
             .or_insert_with(|| RedisObject::new_list());
         if let RedisDataType::List(ref mut vec) = entry.data {
             vec.push_back(elem);
+            vec.extend(elems);
             Ok(vec.len().try_into().unwrap_or_default())
         } else {
             Err(Bytes::from_static(b"Not a list"))
