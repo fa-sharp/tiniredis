@@ -1,6 +1,7 @@
 //! RESP protocol parser
 //!
-//! For more info, see [this article](https://dpbriggs.ca/blog/Implementing-A-Copyless-Redis-Protocol-in-Rust-With-Parsing-Combinators)
+//! For details on the design and inspiration of this module,
+//! see [this article](https://dpbriggs.ca/blog/Implementing-A-Copyless-Redis-Protocol-in-Rust-With-Parsing-Combinators)
 
 mod base;
 mod constants;
@@ -14,15 +15,14 @@ pub use encoder::RespEncoder;
 pub use errors::RedisParseError;
 
 use bytes::{Bytes, BytesMut};
-use bytes_utils::Str;
 use memchr::memchr;
 
 /// Represents a parsed Redis value, or a value that can be sent as a response
 #[derive(Debug)]
 pub enum RedisValue {
-    String(Str),
-    SimpleString(Str),
-    Error(Str),
+    String(Bytes),
+    SimpleString(Bytes),
+    Error(Bytes),
     Int(i64),
     Array(Vec<RedisValue>),
     NulArray,
@@ -47,12 +47,8 @@ impl RedisValueRef {
     /// Get the underlying Redis value that this window is pointing at
     fn extract_redis_value(self, buf: &Bytes) -> Result<RedisValue, RedisParseError> {
         Ok(match self {
-            RedisValueRef::String(window) => RedisValue::String(
-                Str::from_inner(window.as_bytes(buf)).map_err(|_| RedisParseError::InvalidUtf8)?,
-            ),
-            RedisValueRef::Error(window) => RedisValue::Error(
-                Str::from_inner(window.as_bytes(buf)).map_err(|_| RedisParseError::InvalidUtf8)?,
-            ),
+            RedisValueRef::String(window) => RedisValue::String(window.as_bytes(buf)),
+            RedisValueRef::Error(window) => RedisValue::Error(window.as_bytes(buf)),
             RedisValueRef::Int(int) => RedisValue::Int(int),
             RedisValueRef::Array(elems) => RedisValue::Array(
                 elems

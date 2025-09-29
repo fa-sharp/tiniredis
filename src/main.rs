@@ -1,6 +1,11 @@
+mod command;
 mod parser;
-mod request;
-mod response;
+mod storage;
+
+use std::{
+    ops::DerefMut,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::Context;
 use futures::{SinkExt, Stream, TryStreamExt};
@@ -10,34 +15,32 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite};
 
-use crate::{
-    parser::{RedisParseError, RespEncoder, RespParser},
-    request::parse_command,
-    response::process_command,
-};
+use crate::{command::Command, parser::*};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let storage: Arc<Mutex<storage::MemoryStorage>> = Arc::default();
+
     let listener = TcpListener::bind("127.0.0.1:6379").await?;
     println!("tiniredis listening on port 6379...");
 
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
-                tokio::spawn(process(stream));
+                tokio::spawn(process(stream, Arc::clone(&storage)));
             }
             Err(e) => eprintln!("Error connecting to client: {e}"),
         }
     }
 }
 
-async fn process(mut socket: TcpStream) {
+async fn process(mut socket: TcpStream, storage: Arc<Mutex<impl storage::Storage>>) {
     let (reader, writer) = socket.split();
     let mut framed_reader = FramedRead::new(reader, RespParser);
     let mut response_writer = FramedWrite::new(BufWriter::new(writer), RespEncoder);
 
-    if let Err(e) = inner_process(&mut framed_reader, &mut response_writer).await {
-        eprintln!("Error processing request: {e}");
+    if let Err(e) = inner_process(&mut framed_reader, &mut response_writer, storage).await {
+        eprintln!("Error processing request: {e} ({})", e.root_cause());
     };
 
     response_writer.flush().await.ok();
@@ -46,6 +49,7 @@ async fn process(mut socket: TcpStream) {
 async fn inner_process<R, W>(
     mut reader: R,
     writer: &mut FramedWrite<W, RespEncoder>,
+    storage: Arc<Mutex<impl storage::Storage>>,
 ) -> anyhow::Result<()>
 where
     R: Stream<Item = Result<parser::RedisValue, RedisParseError>> + Unpin,
@@ -53,11 +57,14 @@ where
 {
     while let Some(value) = reader.try_next().await.context("parse request")? {
         println!("Received value: {:?}", value);
-        let command = parse_command(value)?;
 
-        let response = process_command(command);
+        let command = Command::from_value(value)?;
+        let response = {
+            let mut storage_lock = storage.lock().unwrap();
+            command.execute(storage_lock.deref_mut())
+        };
+
         println!("Sending response: {:?}", response);
-
         writer.send(response).await.context("write response")?;
     }
 
