@@ -31,24 +31,28 @@ async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:6379").await?;
     println!("tiniredis listening on port 6379...");
 
-    loop {
-        tokio::select! {
-            res = listener.accept() => {
-                match res {
-                    Ok((stream, _)) => {
-                        tokio::spawn(process(stream, Arc::clone(&storage)));
-                    }
-                    Err(e) => eprintln!("Error connecting to client: {e}"),
-                }
-            }
-            _ = shutdown.changed() => {
-                println!("shutdown signal received. goodbye for now 👋");
-                break;
-            },
-        }
+    tokio::select! {
+        _ = main_loop(listener, storage) => {}
+        _ = shutdown.changed() => {
+            println!("shutdown signal received. goodbye for now 👋");
+        },
     }
 
     Ok(())
+}
+
+async fn main_loop(
+    listener: TcpListener,
+    storage: Arc<Mutex<impl storage::Storage + Send + 'static>>,
+) {
+    loop {
+        match listener.accept().await {
+            Ok((stream, _)) => {
+                tokio::spawn(process(stream, Arc::clone(&storage)));
+            }
+            Err(e) => eprintln!("Error connecting to client: {e}"),
+        }
+    }
 }
 
 async fn process(mut socket: TcpStream, storage: Arc<Mutex<impl storage::Storage>>) {
@@ -57,12 +61,7 @@ async fn process(mut socket: TcpStream, storage: Arc<Mutex<impl storage::Storage
     let mut response_writer = FramedWrite::new(BufWriter::new(writer), RespEncoder);
 
     if let Err(e) = inner_process(&mut framed_reader, &mut response_writer, storage).await {
-        let error_message = e.to_string();
-        eprintln!("Error processing request: {error_message}");
-        let root_cause = e.root_cause().to_string();
-        if error_message != root_cause {
-            eprintln!("Cause: {root_cause}");
-        }
+        eprintln!("Error processing request: {e}");
     };
 
     response_writer.flush().await.ok();

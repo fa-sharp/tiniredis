@@ -23,8 +23,16 @@ impl Encoder<RedisValue> for RespEncoder {
                 dst.put_slice(&str);
                 dst.put_slice(constants::CRLF);
             }
-            RedisValue::Error(_) => todo!(),
-            RedisValue::Int(_) => todo!(),
+            RedisValue::Error(str) => {
+                dst.put_u8(b'-');
+                dst.put_slice(&str);
+                dst.put_slice(constants::CRLF);
+            }
+            RedisValue::Int(int) => {
+                dst.put_u8(b':');
+                dst.put_slice(int.to_string().as_bytes());
+                dst.put_slice(constants::CRLF);
+            }
             RedisValue::Array(_) => todo!(),
             RedisValue::NilArray => todo!(),
             RedisValue::NilString => {

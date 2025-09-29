@@ -16,6 +16,10 @@ pub enum Command {
         val: Bytes,
         ttl: Option<u64>,
     },
+    RPush {
+        key: Bytes,
+        elem: Bytes,
+    },
 }
 
 impl Command {
@@ -23,7 +27,7 @@ impl Command {
     pub fn from_value(raw_value: RedisValue) -> anyhow::Result<Self> {
         let mut args = Arguments::from_raw_value(raw_value)?;
 
-        Ok(match args.command() {
+        let command = match args.command() {
             "PING" => Self::Ping,
             "ECHO" => {
                 let message = args.pop_arg("message")?;
@@ -52,8 +56,16 @@ impl Command {
 
                 Self::Set { key, val, ttl }
             }
+            "RPUSH" => {
+                let key = args.pop_arg("key")?;
+                let elem = args.pop_arg("element")?;
+
+                Self::RPush { key, elem }
+            }
             _ => bail!("Unrecognized command"),
-        })
+        };
+
+        Ok(command)
     }
 
     /// Execute the command and get the response value
@@ -69,6 +81,10 @@ impl Command {
                 storage.set(key, val, ttl);
                 RedisValue::SimpleString(Bytes::from_static(b"OK"))
             }
+            Command::RPush { key, elem } => match storage.rpush(key, elem) {
+                Ok(len) => RedisValue::Int(len),
+                Err(bytes) => RedisValue::Error(bytes),
+            },
         }
     }
 }
