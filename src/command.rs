@@ -22,6 +22,11 @@ pub enum Command {
         elem: Bytes,
         elems: Vec<Bytes>,
     },
+    LPush {
+        key: Bytes,
+        elem: Bytes,
+        elems: Vec<Bytes>,
+    },
     LRange {
         key: Bytes,
         start: i64,
@@ -63,7 +68,7 @@ impl Command {
 
                 Self::Set { key, val, ttl }
             }
-            "RPUSH" => {
+            "RPUSH" | "LPUSH" => {
                 let key = args.pop("key")?;
                 let elem = args.pop("element")?;
 
@@ -72,7 +77,11 @@ impl Command {
                     elems.push(elem);
                 }
 
-                Self::RPush { key, elem, elems }
+                if args.command() == "RPUSH" {
+                    Self::RPush { key, elem, elems }
+                } else {
+                    Self::LPush { key, elem, elems }
+                }
             }
             "LRANGE" => {
                 let key = args.pop("key")?;
@@ -100,6 +109,10 @@ impl Command {
                 RedisValue::SimpleString(Bytes::from_static(b"OK"))
             }
             Command::RPush { key, elem, elems } => match storage.rpush(key, elem, elems) {
+                Ok(len) => RedisValue::Int(len),
+                Err(bytes) => RedisValue::Error(bytes),
+            },
+            Command::LPush { key, elem, elems } => match storage.lpush(key, elem, elems) {
                 Ok(len) => RedisValue::Int(len),
                 Err(bytes) => RedisValue::Error(bytes),
             },

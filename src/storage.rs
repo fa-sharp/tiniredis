@@ -25,6 +25,7 @@ pub trait Storage {
     fn get(&self, key: &Bytes) -> Option<Bytes>;
     fn set(&mut self, key: Bytes, val: Bytes, ttl_millis: Option<u64>);
     fn rpush(&mut self, key: Bytes, elem: Bytes, elems: Vec<Bytes>) -> Result<i64, Bytes>;
+    fn lpush(&mut self, key: Bytes, elem: Bytes, elems: Vec<Bytes>) -> Result<i64, Bytes>;
     fn lrange(&self, key: Bytes, start: i64, stop: i64) -> Vec<Bytes>;
     fn cleanup(&mut self);
 }
@@ -51,19 +52,23 @@ impl Storage for MemoryStorage {
     }
 
     fn rpush(&mut self, key: Bytes, elem: Bytes, elems: Vec<Bytes>) -> Result<i64, Bytes> {
-        let entry = self
-            .data
-            .entry(key)
-            .and_modify(|o| {
-                if !o.is_current() {
-                    std::mem::swap(o, &mut RedisObject::new_list())
-                }
-            })
-            .or_insert_with(RedisObject::new_list);
-
+        let entry = self.get_entry_with_default(key, RedisObject::new_list);
         if let RedisDataType::List(ref mut vec) = entry.data {
             vec.push_back(elem);
             vec.extend(elems);
+            Ok(vec.len().try_into().unwrap_or_default())
+        } else {
+            Err(Bytes::from_static(b"Not a list"))
+        }
+    }
+
+    fn lpush(&mut self, key: Bytes, elem: Bytes, elems: Vec<Bytes>) -> Result<i64, Bytes> {
+        let entry = self.get_entry_with_default(key, RedisObject::new_list);
+        if let RedisDataType::List(ref mut vec) = entry.data {
+            vec.push_front(elem);
+            for elem in elems {
+                vec.push_front(elem);
+            }
             Ok(vec.len().try_into().unwrap_or_default())
         } else {
             Err(Bytes::from_static(b"Not a list"))
@@ -111,6 +116,26 @@ impl Storage for MemoryStorage {
     }
 }
 
+impl MemoryStorage {
+    /// Get a mutable reference for the object at the given key. If there was no entry or it was expired,
+    /// use the provided default function to initialize it.
+    fn get_entry_with_default<F>(&mut self, key: Bytes, default_fn: F) -> &mut RedisObject
+    where
+        F: Fn() -> RedisObject,
+    {
+        let entry = self
+            .data
+            .entry(key)
+            .and_modify(|o| {
+                if !o.is_current() {
+                    std::mem::swap(o, &mut default_fn())
+                }
+            })
+            .or_insert_with(default_fn);
+        entry
+    }
+}
+
 impl RedisObject {
     pub fn new(data: RedisDataType) -> Self {
         Self {
@@ -121,7 +146,7 @@ impl RedisObject {
     }
 
     pub fn new_list() -> Self {
-        Self::new(RedisDataType::new_list())
+        Self::new(RedisDataType::List(VecDeque::with_capacity(1)))
     }
 
     pub fn new_with_ttl(data: RedisDataType, ttl_millis: Option<u64>) -> Self {
@@ -138,11 +163,5 @@ impl RedisObject {
         } else {
             true
         }
-    }
-}
-
-impl RedisDataType {
-    fn new_list() -> Self {
-        Self::List(VecDeque::with_capacity(1))
     }
 }
