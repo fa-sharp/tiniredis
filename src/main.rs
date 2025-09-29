@@ -12,18 +12,29 @@ use std::{
 
 use anyhow::Context;
 use bytes::Bytes;
-use futures::{SinkExt, Stream, TryStreamExt};
+use futures::{SinkExt, StreamExt};
 use tokio::{
     io::{AsyncWrite, BufWriter},
     net::{TcpListener, TcpStream},
     sync::watch,
 };
 use tokio_util::codec::{FramedRead, FramedWrite};
+use tracing::{debug, info, warn};
 
 use crate::{command::Command, parser::*};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    #[cfg(debug_assertions)]
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::level_filters::LevelFilter::DEBUG)
+        .init();
+    #[cfg(not(debug_assertions))]
+    tracing_subscriber::fmt()
+        .event_format(tracing_subscriber::fmt::format::json())
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+
     let mut shutdown = setup_shutdown_signal();
     let storage: Arc<Mutex<storage::MemoryStorage>> = Arc::default();
 
@@ -35,12 +46,12 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(6379);
     let listener = TcpListener::bind(format!("{host}:{port}")).await?;
-    println!("tinikeyval listening on {host}:{port}...");
+    info!("tinikeyval listening on {host}:{port}...");
 
     tokio::select! {
         _ = main_loop(listener, storage) => {}
         _ = shutdown.changed() => {
-            println!("shutdown signal received. goodbye for now 👋");
+            info!("shutdown signal received. goodbye for now 👋");
         },
     }
 
@@ -56,7 +67,7 @@ async fn main_loop(
             Ok((stream, _)) => {
                 tokio::spawn(process(stream, Arc::clone(&storage)));
             }
-            Err(e) => eprintln!("Error connecting to client: {e}"),
+            Err(e) => warn!("Error connecting to client: {e}"),
         }
     }
 }
@@ -64,45 +75,46 @@ async fn main_loop(
 /// Create framed reader and writer to decode and encode RESP frames, and forward to
 /// inner process to handle the request.
 async fn process(mut socket: TcpStream, storage: Arc<Mutex<impl storage::Storage>>) {
+    debug!("New connection");
     let (reader, writer) = socket.split();
     let mut framed_reader = FramedRead::new(reader, RespParser);
     let mut response_writer = FramedWrite::new(BufWriter::new(writer), RespEncoder);
 
-    // Forward to inner process to handle the incoming command(s).
+    // Forward reader values to inner process to handle the incoming command(s).
     // Catch any bubbled errors and try sending them to client.
-    if let Err(e) = inner_process(&mut framed_reader, &mut response_writer, storage).await {
-        let message = e.to_string();
-        eprintln!("Error processing request: {message}");
-        let error_value = RedisValue::Error(Bytes::from(message.into_bytes()));
-        response_writer.send(error_value).await.ok();
-    };
+    while let Some(value) = framed_reader.next().await {
+        if let Err(e) = inner_process(value, &mut response_writer, &storage).await {
+            let message = e.to_string();
+            warn!("Error processing request: {message}");
+            let error_value = RedisValue::Error(Bytes::from(message.into_bytes()));
+            response_writer.send(error_value).await.ok();
+        };
+    }
 
     response_writer.flush().await.ok();
 }
 
-/// Parse, execute, and respond to the incoming command(s)
-async fn inner_process<R, W>(
-    mut reader: R,
+/// Parse, execute, and respond to the incoming command
+async fn inner_process<W>(
+    read_result: Result<RedisValue, RedisParseError>,
     writer: &mut FramedWrite<W, RespEncoder>,
-    storage: Arc<Mutex<impl storage::Storage>>,
+    storage: &Mutex<impl storage::Storage>,
 ) -> anyhow::Result<()>
 where
-    R: Stream<Item = Result<parser::RedisValue, RedisParseError>> + Unpin,
     W: AsyncWrite + Unpin,
 {
-    while let Some(value) = reader.try_next().await.context("parse request")? {
-        println!("Received value: {:?}", value);
+    let value = read_result.context("parse request")?;
+    debug!("Received value: {:?}", value);
 
-        let command = Command::from_value(value)?;
-        println!("Parsed command: {:?}", command);
-        let response = {
-            let mut storage_lock = storage.lock().unwrap();
-            command.execute(storage_lock.deref_mut())
-        };
+    let command = Command::from_value(value)?;
+    debug!("Parsed command: {:?}", command);
 
-        println!("Sending response: {:?}", response);
-        writer.send(response).await.context("write response")?;
-    }
+    let response = {
+        let mut storage_lock = storage.lock().unwrap();
+        command.execute(storage_lock.deref_mut())
+    };
+    debug!("Sending response: {:?}", response);
+    writer.send(response).await.context("write response")?;
 
     Ok(())
 }
@@ -126,7 +138,7 @@ async fn cleanup_task(
 fn setup_shutdown_signal() -> watch::Receiver<bool> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     ctrlc::set_handler(move || {
-        println!("\nsending shutdown signal...");
+        info!("sending shutdown signal...");
         shutdown_tx
             .send(true)
             .expect("Failed to send shutdown signal");

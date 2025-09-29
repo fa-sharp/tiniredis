@@ -1,7 +1,6 @@
 [package]
 name = "tinikeyval"
 version = "0.1.0"
-authors = ["Codecrafters <hello@codecrafters.io>"]
 edition = "2021"
 
 [dependencies]
@@ -13,3 +12,5 @@ memchr = "2.7.5"
 thiserror = "2.0.16"  # error handling
 tokio = { version = "1.47.1", features = ["full"] }  # async networking
 tokio-util = { version = "0.7.16", features = ["codec"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }

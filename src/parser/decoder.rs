@@ -1,4 +1,5 @@
 use tokio_util::codec::Decoder;
+use tracing::debug;
 
 use super::*;
 
@@ -14,8 +15,8 @@ impl Decoder for RespParser {
             return Ok(None);
         }
 
-        println!(
-            "\nReceiving raw value: {}",
+        debug!(
+            "Receiving raw value: {}",
             String::from_utf8_lossy(buf).escape_debug()
         );
 
