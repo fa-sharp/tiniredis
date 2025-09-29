@@ -29,9 +29,20 @@ pub enum RedisValue {
     NilString,
 }
 
-/// The indeces within a buffer (exclusive end) to get the output type
-#[derive(Debug, PartialEq)]
-struct BufWindow(usize, usize);
+impl RedisValue {
+    pub fn as_bytes(&self) -> Option<&Bytes> {
+        match self {
+            RedisValue::String(bytes) | RedisValue::SimpleString(bytes) => Some(bytes),
+            _ => None,
+        }
+    }
+    pub fn into_bytes(self) -> Option<Bytes> {
+        match self {
+            RedisValue::String(bytes) | RedisValue::SimpleString(bytes) => Some(bytes),
+            _ => None,
+        }
+    }
+}
 
 /// References to values within the raw RESP response bytes
 enum RedisValueRef {
@@ -61,6 +72,10 @@ impl RedisValueRef {
         })
     }
 }
+
+/// The indeces within a buffer (exclusive end) to get the output type
+#[derive(Debug, PartialEq)]
+struct BufWindow(usize, usize);
 
 impl BufWindow {
     #[inline]

@@ -5,9 +5,17 @@ use crate::{arguments::Arguments, parser::RedisValue, storage::Storage};
 
 pub enum Command {
     Ping,
-    Echo { message: Bytes },
-    Get { key: Bytes },
-    Set { key: Bytes, val: Bytes },
+    Echo {
+        message: Bytes,
+    },
+    Get {
+        key: Bytes,
+    },
+    Set {
+        key: Bytes,
+        val: Bytes,
+        ttl: Option<u64>,
+    },
 }
 
 impl Command {
@@ -28,7 +36,21 @@ impl Command {
             "SET" => {
                 let key = args.pop_arg("key")?;
                 let val = args.pop_arg("value")?;
-                Self::Set { key, val }
+
+                let ex = args.optional_named_arg("EX");
+                let px = args.optional_named_arg("PX");
+                let ttl = match (ex, px) {
+                    (None, None) => None,
+                    (Some(ex), None) => Some(
+                        std::str::from_utf8(ex)?
+                            .parse::<u64>()
+                            .map(|secs| secs * 1000)?,
+                    ),
+                    (None, Some(px)) => Some(std::str::from_utf8(px)?.parse()?),
+                    (Some(_), Some(_)) => bail!("can't provide both EX and PX"),
+                };
+
+                Self::Set { key, val, ttl }
             }
             _ => bail!("Unrecognized command"),
         })
@@ -43,8 +65,8 @@ impl Command {
                 Some(val) => RedisValue::String(val),
                 None => RedisValue::NilString,
             },
-            Command::Set { key, val } => {
-                storage.set(key, val);
+            Command::Set { key, val, ttl } => {
+                storage.set(key, val, ttl);
                 RedisValue::SimpleString(Bytes::from_static(b"OK"))
             }
         }
