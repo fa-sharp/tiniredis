@@ -4,6 +4,7 @@ mod parser;
 mod storage;
 
 use std::{
+    env,
     ops::DerefMut,
     sync::{Arc, Mutex},
     time::Duration,
@@ -26,11 +27,15 @@ async fn main() -> anyhow::Result<()> {
     let mut shutdown = setup_shutdown_signal();
     let storage: Arc<Mutex<storage::MemoryStorage>> = Arc::default();
 
-    println!("starting cleanup task...");
     tokio::spawn(cleanup_task(Arc::clone(&storage), shutdown.clone()));
 
-    let listener = TcpListener::bind("127.0.0.1:6379").await?;
-    println!("tiniredis listening on port 6379...");
+    let host = env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_owned());
+    let port: u16 = env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(6379);
+    let listener = TcpListener::bind(format!("{host}:{port}")).await?;
+    println!("tiniredis listening on {host}:{port}...");
 
     tokio::select! {
         _ = main_loop(listener, storage) => {}

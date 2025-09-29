@@ -69,20 +69,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
-name = "codecrafters-redis"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytes",
- "ctrlc",
- "futures",
- "memchr",
- "thiserror",
- "tokio",
- "tokio-util",
-]
-
-[[package]]
 name = "ctrlc"
 version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -402,6 +388,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "tinikeyval"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bytes",
+ "ctrlc",
+ "futures",
+ "memchr",
+ "thiserror",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
