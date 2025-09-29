@@ -25,8 +25,8 @@ pub enum RedisValue {
     Error(Bytes),
     Int(i64),
     Array(Vec<RedisValue>),
-    NulArray,
-    NulString,
+    NilArray,
+    NilString,
 }
 
 /// The indeces within a buffer (exclusive end) to get the output type
@@ -56,8 +56,8 @@ impl RedisValueRef {
                     .map(|value_ref| value_ref.extract_redis_value(buf))
                     .collect::<Result<_, _>>()?,
             ),
-            RedisValueRef::NulArray => RedisValue::NulArray,
-            RedisValueRef::NulString => RedisValue::NulString,
+            RedisValueRef::NulArray => RedisValue::NilArray,
+            RedisValueRef::NulString => RedisValue::NilString,
         })
     }
 }

@@ -1,3 +1,4 @@
+mod arguments;
 mod command;
 mod parser;
 mod storage;
@@ -40,7 +41,12 @@ async fn process(mut socket: TcpStream, storage: Arc<Mutex<impl storage::Storage
     let mut response_writer = FramedWrite::new(BufWriter::new(writer), RespEncoder);
 
     if let Err(e) = inner_process(&mut framed_reader, &mut response_writer, storage).await {
-        eprintln!("Error processing request: {e} ({})", e.root_cause());
+        let error_message = e.to_string();
+        eprintln!("Error processing request: {error_message}");
+        let root_cause = e.root_cause().to_string();
+        if error_message != root_cause {
+            eprintln!("Cause: {root_cause}");
+        }
     };
 
     response_writer.flush().await.ok();

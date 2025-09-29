@@ -26,8 +26,8 @@ impl Encoder<RedisValue> for RespEncoder {
             RedisValue::Error(_) => todo!(),
             RedisValue::Int(_) => todo!(),
             RedisValue::Array(_) => todo!(),
-            RedisValue::NulArray => todo!(),
-            RedisValue::NulString => {
+            RedisValue::NilArray => todo!(),
+            RedisValue::NilString => {
                 dst.put_slice(b"$-1");
                 dst.put_slice(constants::CRLF);
             }
