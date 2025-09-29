@@ -4,6 +4,7 @@ use bytes::Bytes;
 use tokio::time::Instant;
 
 /// Redis object stored in memory
+#[derive(Debug)]
 pub struct RedisObject {
     /// Instant when object was created
     created: Instant,
@@ -22,6 +23,7 @@ pub enum RedisDataType {
 pub trait Storage {
     fn get(&self, key: &Bytes) -> Option<Bytes>;
     fn set(&mut self, key: Bytes, val: Bytes, ttl_millis: Option<u64>);
+    fn cleanup(&mut self);
 }
 
 #[derive(Default)]
@@ -46,6 +48,10 @@ impl Storage for MemoryStorage {
             data: RedisDataType::String(val),
         };
         self.data.insert(key, object);
+    }
+
+    fn cleanup(&mut self) {
+        self.data.retain(|_, o| o.is_current());
     }
 }
 
