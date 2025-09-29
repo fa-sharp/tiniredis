@@ -33,8 +33,18 @@ impl Encoder<RedisValue> for RespEncoder {
                 dst.put_slice(int.to_string().as_bytes());
                 dst.put_slice(constants::CRLF);
             }
-            RedisValue::Array(_) => todo!(),
-            RedisValue::NilArray => todo!(),
+            RedisValue::Array(values) => {
+                dst.put_u8(b'*');
+                dst.put_slice(values.len().to_string().as_bytes());
+                dst.put_slice(constants::CRLF);
+                for value in values {
+                    self.encode(value, dst)?;
+                }
+            }
+            RedisValue::NilArray => {
+                dst.put_slice(b"*-1");
+                dst.put_slice(constants::CRLF);
+            }
             RedisValue::NilString => {
                 dst.put_slice(b"$-1");
                 dst.put_slice(constants::CRLF);

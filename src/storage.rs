@@ -25,6 +25,7 @@ pub trait Storage {
     fn get(&self, key: &Bytes) -> Option<Bytes>;
     fn set(&mut self, key: Bytes, val: Bytes, ttl_millis: Option<u64>);
     fn rpush(&mut self, key: Bytes, elem: Bytes, elems: Vec<Bytes>) -> Result<i64, Bytes>;
+    fn lrange(&self, key: Bytes, start: i64, stop: i64) -> Vec<Bytes>;
     fn cleanup(&mut self);
 }
 
@@ -66,6 +67,42 @@ impl Storage for MemoryStorage {
         } else {
             Err(Bytes::from_static(b"Not a list"))
         }
+    }
+
+    fn lrange(&self, key: Bytes, start: i64, stop: i64) -> Vec<Bytes> {
+        let Some(obj) = self.data.get(&key) else {
+            return Vec::new();
+        };
+        let RedisDataType::List(ref list) = obj.data else {
+            return Vec::new();
+        };
+
+        let beg: usize = if start < 0 {
+            list.len()
+                .checked_add_signed(start.try_into().unwrap_or_default())
+                .unwrap_or_default()
+        } else {
+            start as usize
+        };
+        if beg >= list.len() {
+            return Vec::new();
+        }
+
+        let mut end: usize = if stop < 0 {
+            list.len()
+                .checked_add_signed(stop.try_into().unwrap_or_default())
+                .unwrap_or_default()
+        } else {
+            stop as usize
+        };
+        if end >= list.len() {
+            end = list.len() - 1;
+        }
+        if beg > end {
+            return Vec::new();
+        }
+
+        list.range(beg..=end).cloned().collect()
     }
 
     fn cleanup(&mut self) {

@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use bytes::Bytes;
 
 use crate::parser::RedisValue;
@@ -43,22 +43,35 @@ impl Arguments {
         Ok(arg)
     }
 
+    /// Pop and parse the next argument as an i64 or return an error
+    pub fn pop_i64(&mut self, name: &str) -> anyhow::Result<i64> {
+        let Some(arg) = self.args.pop_front().and_then(|a| a.into_bytes()) else {
+            bail!("{}: {name} argument missing", self.command);
+        };
+        Ok(std::str::from_utf8(&arg)
+            .context("invalid integer")?
+            .parse()
+            .context("invalid integer")?)
+    }
+
     /// Pop the next argument if it exists
     pub fn pop_optional(&mut self) -> Option<Bytes> {
         self.args.pop_front().and_then(|a| a.into_bytes())
     }
 
     /// Get optional named argument (e.g. if `EX 123` given for SET, get `123`)
-    pub fn optional_named(&self, name: &str) -> Option<&Bytes> {
+    pub fn pop_optional_named(&mut self, name: &str) -> Option<Bytes> {
         if let Some(arg_idx) = self.args.iter().position(|a| {
             if let Some(name_arg) = a.as_bytes() {
                 return name_arg.eq_ignore_ascii_case(name.as_bytes());
             }
             false
         }) {
-            self.args.get(arg_idx + 1).and_then(|a| a.as_bytes())
-        } else {
-            None
+            if self.args.get(arg_idx + 1).is_some() {
+                self.args.remove(arg_idx);
+                return self.args.remove(arg_idx).and_then(|a| a.into_bytes());
+            }
         }
+        None
     }
 }
