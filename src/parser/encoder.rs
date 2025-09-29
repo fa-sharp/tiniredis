@@ -52,7 +52,7 @@ impl Encoder<RedisValue> for RespEncoder {
         }
 
         println!(
-            "Sending raw value: {}",
+            "Building raw value: {}",
             String::from_utf8_lossy(dst).escape_debug()
         );
 

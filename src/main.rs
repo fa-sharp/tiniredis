@@ -10,6 +10,7 @@ use std::{
 };
 
 use anyhow::Context;
+use bytes::Bytes;
 use futures::{SinkExt, Stream, TryStreamExt};
 use tokio::{
     io::{AsyncWrite, BufWriter},
@@ -55,18 +56,26 @@ async fn main_loop(
     }
 }
 
+/// Create framed reader and writer to decode and encode RESP frames, and forward to
+/// inner process to handle the request.
 async fn process(mut socket: TcpStream, storage: Arc<Mutex<impl storage::Storage>>) {
     let (reader, writer) = socket.split();
     let mut framed_reader = FramedRead::new(reader, RespParser);
     let mut response_writer = FramedWrite::new(BufWriter::new(writer), RespEncoder);
 
+    // Forward to inner process to handle the incoming command(s).
+    // Catch any bubbled errors and try sending them to client.
     if let Err(e) = inner_process(&mut framed_reader, &mut response_writer, storage).await {
-        eprintln!("Error processing request: {e}");
+        let message = e.to_string();
+        eprintln!("Error processing request: {message}");
+        let error_value = RedisValue::Error(Bytes::from(message.into_bytes()));
+        response_writer.send(error_value).await.ok();
     };
 
     response_writer.flush().await.ok();
 }
 
+/// Parse, execute, and respond to the incoming command(s)
 async fn inner_process<R, W>(
     mut reader: R,
     writer: &mut FramedWrite<W, RespEncoder>,
@@ -80,6 +89,7 @@ where
         println!("Received value: {:?}", value);
 
         let command = Command::from_value(value)?;
+        println!("Parsed command: {:?}", command);
         let response = {
             let mut storage_lock = storage.lock().unwrap();
             command.execute(storage_lock.deref_mut())
@@ -92,6 +102,7 @@ where
     Ok(())
 }
 
+/// Cleanup expired keys
 async fn cleanup_task(
     storage: Arc<Mutex<impl storage::Storage>>,
     mut shutdown: watch::Receiver<bool>,
@@ -106,6 +117,7 @@ async fn cleanup_task(
     }
 }
 
+/// For graceful shutdown, setup a signal listener with tokio watch channel
 fn setup_shutdown_signal() -> watch::Receiver<bool> {
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
     ctrlc::set_handler(move || {

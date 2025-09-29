@@ -3,6 +3,7 @@ use bytes::Bytes;
 
 use crate::{arguments::Arguments, parser::RedisValue, storage::Storage};
 
+#[derive(Debug)]
 pub enum Command {
     Ping,
     Echo {

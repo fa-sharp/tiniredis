@@ -15,7 +15,7 @@ impl Decoder for RespParser {
         }
 
         println!(
-            "\nReceived raw value: {}",
+            "\nReceiving raw value: {}",
             String::from_utf8_lossy(buf).escape_debug()
         );
 

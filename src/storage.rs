@@ -59,7 +59,8 @@ impl Storage for MemoryStorage {
                     std::mem::swap(o, &mut RedisObject::new_list())
                 }
             })
-            .or_insert_with(|| RedisObject::new_list());
+            .or_insert_with(RedisObject::new_list);
+
         if let RedisDataType::List(ref mut vec) = entry.data {
             vec.push_back(elem);
             vec.extend(elems);

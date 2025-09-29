@@ -48,10 +48,11 @@ impl Arguments {
         let Some(arg) = self.args.pop_front().and_then(|a| a.into_bytes()) else {
             bail!("{}: {name} argument missing", self.command);
         };
-        Ok(std::str::from_utf8(&arg)
+
+        std::str::from_utf8(&arg)
             .context("invalid integer")?
             .parse()
-            .context("invalid integer")?)
+            .context("invalid integer")
     }
 
     /// Pop the next argument if it exists
