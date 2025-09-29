@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(6379);
     let listener = TcpListener::bind(format!("{host}:{port}")).await?;
-    println!("tiniredis listening on {host}:{port}...");
+    println!("tinikeyval listening on {host}:{port}...");
 
     tokio::select! {
         _ = main_loop(listener, storage) => {}
