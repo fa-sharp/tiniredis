@@ -51,7 +51,7 @@ pub enum Command {
     BPop {
         key: Bytes,
         dir: ListDirection,
-        timeout: u64,
+        timeout_millis: u64,
     },
     LLen {
         key: Bytes,

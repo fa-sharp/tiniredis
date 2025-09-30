@@ -72,13 +72,18 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
         }
         "BRPOP" | "BLPOP" => {
             let key = args.pop("key")?;
-            let timeout = args.pop_parse("timeout")?;
+            let timeout = args.pop_parse::<f32>("timeout")?;
+            let timeout_millis = (timeout * 1000.0).round() as u64;
             let dir = match args.command() {
                 "BRPOP" => ListDirection::Right,
                 "BLPOP" => ListDirection::Left,
                 _ => unreachable!(),
             };
-            Command::BPop { key, dir, timeout }
+            Command::BPop {
+                key,
+                dir,
+                timeout_millis,
+            }
         }
         "LLEN" => {
             let key = args.pop("key")?;
@@ -88,7 +93,6 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             let key = args.pop("key")?;
             let start = args.pop_parse("start index")?;
             let stop = args.pop_parse("stop index")?;
-
             Command::LRange { key, start, stop }
         }
         cmd => bail!("Unrecognized command '{cmd}'"),
