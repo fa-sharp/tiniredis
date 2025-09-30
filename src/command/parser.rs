@@ -113,6 +113,27 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             let end = args.pop("end")?;
             Command::XRange { key, start, end }
         }
+        "XREAD" => {
+            match args.pop("streams")?.to_ascii_uppercase().as_slice() {
+                b"STREAMS" => {}
+                _ => bail!("STREAMS keyword is required"),
+            }
+
+            let mut keys_and_ids = Vec::new();
+            while let Some(arg) = args.pop_optional() {
+                keys_and_ids.push(arg);
+            }
+            if keys_and_ids.len() < 2 {
+                bail!("Must provide a stream key and ID");
+            }
+            if keys_and_ids.len() % 2 != 0 {
+                bail!("Unbalanced 'xread' list of streams: for each stream key an ID or '$' must be specified.")
+            }
+            let (keys, ids) = keys_and_ids.split_at(keys_and_ids.len() / 2);
+            let streams = keys.iter().cloned().zip(ids.iter().cloned()).collect();
+
+            Command::XRead { streams }
+        }
         cmd => bail!("Unrecognized command '{cmd}'"),
     };
 

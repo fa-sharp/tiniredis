@@ -77,6 +77,9 @@ pub enum Command {
         start: Bytes,
         end: Bytes,
     },
+    XRead {
+        streams: Vec<(Bytes, Bytes)>,
+    },
 }
 
 /// The possible responses from a command

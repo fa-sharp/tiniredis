@@ -103,34 +103,43 @@ pub fn execute_command(
             RedisValue::Array(elems.into_iter().map(RedisValue::String).collect()).into()
         }
         Command::XAdd { key, id, data } => match storage.xadd(key, id, data) {
-            Ok(id) => RedisValue::String(format_stream_key(id)).into(),
+            Ok(id) => RedisValue::String(format_stream_id(id)).into(),
             Err(err) => RedisValue::Error(err).into(),
         },
         Command::XLen { key } => RedisValue::Int(storage.xlen(&key)).into(),
         Command::XRange { key, start, end } => match storage.xrange(&key, &start, &end) {
-            Ok(entries) => RedisValue::Array(
-                entries
-                    .into_iter()
-                    .map(|(id, data)| {
-                        RedisValue::Array(vec![
-                            RedisValue::String(format_stream_key(id)),
-                            RedisValue::Array(
-                                data.into_iter()
-                                    .flat_map(|(field, value)| {
-                                        [RedisValue::String(field), RedisValue::String(value)]
-                                    })
-                                    .collect(),
-                            ),
-                        ])
-                    })
-                    .collect(),
-            )
-            .into(),
+            Ok(entries) => {
+                RedisValue::Array(entries.into_iter().map(format_stream_entry).collect()).into()
+            }
+            Err(err) => RedisValue::Error(err).into(),
+        },
+        Command::XRead { streams } => match storage.xread(streams) {
+            Ok(streams) => {
+                RedisValue::Array(streams.into_iter().map(format_stream).collect()).into()
+            }
             Err(err) => RedisValue::Error(err).into(),
         },
     }
 }
 
-fn format_stream_key((ms, seq): (u64, u64)) -> Bytes {
+fn format_stream_id((ms, seq): (u64, u64)) -> Bytes {
     Bytes::from([ms.to_string().as_bytes(), b"-", seq.to_string().as_bytes()].concat())
+}
+
+fn format_stream_entry((id, data): ((u64, u64), Vec<(Bytes, Bytes)>)) -> RedisValue {
+    RedisValue::Array(vec![
+        RedisValue::String(format_stream_id(id)),
+        RedisValue::Array(
+            data.into_iter()
+                .flat_map(|(field, value)| [RedisValue::String(field), RedisValue::String(value)])
+                .collect(),
+        ),
+    ])
+}
+
+fn format_stream((key, entries): (Bytes, Vec<((u64, u64), Vec<(Bytes, Bytes)>)>)) -> RedisValue {
+    RedisValue::Array(vec![
+        RedisValue::String(key),
+        RedisValue::Array(entries.into_iter().map(format_stream_entry).collect()),
+    ])
 }

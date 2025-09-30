@@ -6,6 +6,8 @@ use std::{
 use bytes::Bytes;
 use tokio::time::Instant;
 
+type StreamEntry = ((u64, u64), Vec<(Bytes, Bytes)>);
+
 /// Storage interface
 pub trait Storage {
     fn get(&self, key: &Bytes) -> Option<Bytes>;
@@ -29,12 +31,8 @@ pub trait Storage {
         data: Vec<(Bytes, Bytes)>,
     ) -> Result<(u64, u64), Bytes>;
     fn xlen(&self, key: &Bytes) -> i64;
-    fn xrange(
-        &self,
-        key: &Bytes,
-        start: &Bytes,
-        end: &Bytes,
-    ) -> Result<Vec<((u64, u64), Vec<(Bytes, Bytes)>)>, Bytes>;
+    fn xrange(&self, key: &Bytes, start: &Bytes, end: &Bytes) -> Result<Vec<StreamEntry>, Bytes>;
+    fn xread(&self, streams: Vec<(Bytes, Bytes)>) -> Result<Vec<(Bytes, Vec<StreamEntry>)>, Bytes>;
     fn size(&self) -> i64;
     fn flush(&mut self);
     fn cleanup_expired(&mut self);
@@ -247,12 +245,7 @@ impl Storage for MemoryStorage {
         }
     }
 
-    fn xrange(
-        &self,
-        key: &Bytes,
-        start: &Bytes,
-        end: &Bytes,
-    ) -> Result<Vec<((u64, u64), Vec<(Bytes, Bytes)>)>, Bytes> {
+    fn xrange(&self, key: &Bytes, start: &Bytes, end: &Bytes) -> Result<Vec<StreamEntry>, Bytes> {
         let start = match start.as_ref() {
             b"-" => (0, 0),
             _ => parse_stream_id(start, false, |_| 0)?,
@@ -271,6 +264,24 @@ impl Storage for MemoryStorage {
         } else {
             Ok(Vec::new())
         }
+    }
+
+    fn xread(&self, streams: Vec<(Bytes, Bytes)>) -> Result<Vec<(Bytes, Vec<StreamEntry>)>, Bytes> {
+        let mut response = Vec::new();
+        for (key, id) in streams {
+            let (start_ms, start_seq) = parse_stream_id(&id, false, |_| 0)?;
+            if let Some(RedisDataType::Stream(map)) = self.get(&key) {
+                let entries: Vec<StreamEntry> = map
+                    .range((start_ms, start_seq + 1)..)
+                    .map(|(id, data)| (*id, data.to_owned()))
+                    .collect();
+                if !entries.is_empty() {
+                    response.push((key, entries));
+                }
+            }
+        }
+
+        Ok(response)
     }
 
     fn size(&self) -> i64 {
