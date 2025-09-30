@@ -32,6 +32,12 @@ pub enum Command {
         val: Bytes,
         ttl: Option<u64>,
     },
+    Ttl {
+        key: Bytes,
+    },
+    Del {
+        keys: Vec<Bytes>,
+    },
     Push {
         key: Bytes,
         elems: VecDeque<Bytes>,

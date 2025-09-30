@@ -7,6 +7,8 @@ use tokio::time::Instant;
 pub trait Storage {
     fn get(&self, key: &Bytes) -> Option<Bytes>;
     fn set(&mut self, key: Bytes, val: Bytes, ttl_millis: Option<u64>);
+    fn ttl(&self, key: &Bytes) -> i64;
+    fn del(&mut self, key: &Bytes) -> bool;
     fn push(
         &mut self,
         key: Bytes,
@@ -65,6 +67,23 @@ impl Storage for MemoryStorage {
     fn set(&mut self, key: Bytes, val: Bytes, ttl_millis: Option<u64>) {
         let object = RedisObject::new_with_ttl(RedisDataType::String(val), ttl_millis);
         self.data.insert(key, object);
+    }
+
+    fn ttl(&self, key: &Bytes) -> i64 {
+        match self.data.get(key).filter(|o| o.is_current()) {
+            Some(obj) => match obj.ttl_millis {
+                Some(ttl) => {
+                    let ttl = ttl as u128 - Instant::now().duration_since(obj.created).as_millis();
+                    (ttl / 1000).try_into().unwrap_or_default()
+                }
+                None => -1,
+            },
+            None => -2,
+        }
+    }
+
+    fn del(&mut self, key: &Bytes) -> bool {
+        self.data.remove(key).is_some()
     }
 
     fn push(

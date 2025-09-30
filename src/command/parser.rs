@@ -35,6 +35,17 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             };
             Command::Set { key, val, ttl }
         }
+        "TTL" => {
+            let key = args.pop("key")?;
+            Command::Ttl { key }
+        }
+        "DEL" => {
+            let mut keys = vec![args.pop("key")?];
+            while let Some(key) = args.pop_optional() {
+                keys.push(key);
+            }
+            Command::Del { keys }
+        }
         "RPUSH" | "LPUSH" => {
             let key = args.pop("key")?;
             let elem = args.pop("element")?;
@@ -84,7 +95,14 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
     };
 
     if args.remaining().len() != 0 {
-        bail!("Unrecognized arguments: {:?}", args.remaining());
+        let mut message = String::from("Unrecognized arguments: ");
+        for arg in args.remaining() {
+            if let Some(str) = arg.as_bytes().and_then(|a| std::str::from_utf8(a).ok()) {
+                message.push_str(str);
+                message.push_str(" ");
+            }
+        }
+        bail!("{message}");
     }
 
     Ok(command)

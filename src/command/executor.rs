@@ -31,6 +31,16 @@ pub fn execute_command(
             storage.set(key, val, ttl);
             RedisValue::SimpleString(Bytes::from_static(b"OK")).into()
         }
+        Command::Ttl { key } => RedisValue::Int(storage.ttl(&key)).into(),
+        Command::Del { keys } => {
+            let mut count = 0;
+            for key in keys {
+                if storage.del(&key) {
+                    count += 1;
+                }
+            }
+            RedisValue::Int(count).into()
+        }
         Command::Push { key, elems, dir } => match storage.push(key.clone(), elems, dir) {
             Ok(len) => {
                 senders.notify_bpop(key); // notify blocking pop clients
