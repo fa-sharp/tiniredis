@@ -199,13 +199,13 @@ impl Storage for MemoryStorage {
         // Validate ID
         if id == (0, 0) {
             return Err(Bytes::from_static(
-                b"The ID specified in XADD must be greater than 0-0",
+                b"ERR The ID specified in XADD must be greater than 0-0",
             ));
         }
         if let Some(RedisDataType::Stream(map)) = self.get(&key) {
             if let Some((last_id, _)) = map.last_key_value() {
                 if id <= *last_id {
-                    return Err(Bytes::from_static(b"The ID specified in XADD is equal or smaller than the target stream top item"));
+                    return Err(Bytes::from_static(b"ERR The ID specified in XADD is equal or smaller than the target stream top item"));
                 }
             }
         }
