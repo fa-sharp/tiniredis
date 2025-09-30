@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::{
+    collections::{BTreeMap, HashMap, VecDeque},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use bytes::Bytes;
 use tokio::time::Instant;
@@ -22,7 +25,7 @@ pub trait Storage {
     fn xadd(
         &mut self,
         key: Bytes,
-        id: (u64, u64),
+        id: Bytes,
         data: Vec<(Bytes, Bytes)>,
     ) -> Result<(u64, u64), Bytes>;
     fn size(&self) -> i64;
@@ -193,21 +196,55 @@ impl Storage for MemoryStorage {
     fn xadd(
         &mut self,
         key: Bytes,
-        id: (u64, u64),
+        id: Bytes,
         data: Vec<(Bytes, Bytes)>,
     ) -> Result<(u64, u64), Bytes> {
-        // Validate ID
+        const INVALID_ID: Bytes = Bytes::from_static(b"ERR invalid ID");
+        const MIN_ID: (u64, u64) = (0, 0);
+
+        // Validate/generate ID
+        let min_id = if let Some(RedisDataType::Stream(map)) = self.get(&key) {
+            map.last_key_value().map(|(id, _)| *id).unwrap_or(MIN_ID)
+        } else {
+            MIN_ID
+        };
+        let id = {
+            let mut id_split = id.splitn(2, |b| *b == b'-');
+            let ms: u64 = match std::str::from_utf8(id_split.next().expect("first split"))
+                .map_err(|_| INVALID_ID)?
+            {
+                "*" => SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+                ms => ms.parse().map_err(|_| INVALID_ID)?,
+            };
+            let seq: u64 = match id_split
+                .next()
+                .map(std::str::from_utf8)
+                .transpose()
+                .map_err(|_| INVALID_ID)?
+            {
+                Some("*") | None => {
+                    if ms == min_id.0 {
+                        min_id.1 + 1
+                    } else {
+                        0
+                    }
+                }
+                Some(seq) => seq.parse().map_err(|_| INVALID_ID)?,
+            };
+            (ms, seq)
+        };
         if id == (0, 0) {
             return Err(Bytes::from_static(
                 b"ERR The ID specified in XADD must be greater than 0-0",
             ));
         }
-        if let Some(RedisDataType::Stream(map)) = self.get(&key) {
-            if let Some((last_id, _)) = map.last_key_value() {
-                if id <= *last_id {
-                    return Err(Bytes::from_static(b"ERR The ID specified in XADD is equal or smaller than the target stream top item"));
-                }
-            }
+        if id <= min_id {
+            return Err(Bytes::from_static(
+                b"ERR The ID specified in XADD is equal or smaller than the target stream top item",
+            ));
         }
 
         // Insert entry into stream, creating a new stream if needed
