@@ -65,6 +65,7 @@ async fn main() -> anyhow::Result<()> {
     ));
     all_tasks.spawn(tasks::cleanup_task(
         Arc::clone(&storage),
+        Arc::clone(&queues),
         shutdown_sig.clone(),
     ));
 

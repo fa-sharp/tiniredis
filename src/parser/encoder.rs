@@ -1,3 +1,5 @@
+//! RESP encoder
+
 use bytes::BufMut;
 use tokio_util::codec::Encoder;
 use tracing::debug;

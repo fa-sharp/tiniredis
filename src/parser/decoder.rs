@@ -1,3 +1,5 @@
+//! RESP decoder
+
 use tokio_util::codec::Decoder;
 use tracing::debug;
 

@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, str::FromStr};
 
 use anyhow::{bail, Context};
 use bytes::Bytes;
@@ -35,7 +35,7 @@ impl Arguments {
         self.command.as_str()
     }
 
-    /// Pop the next argument or return an error
+    /// Pop the next argument as bytes or return an error
     pub fn pop(&mut self, name: &str) -> anyhow::Result<Bytes> {
         let Some(arg) = self.args.pop_front().and_then(|a| a.into_bytes()) else {
             bail!("{}: {name} argument missing", self.command);
@@ -43,16 +43,20 @@ impl Arguments {
         Ok(arg)
     }
 
-    /// Pop and parse the next argument as an i64 or return an error
-    pub fn pop_i64(&mut self, name: &str) -> anyhow::Result<i64> {
+    /// Pop and parse the next argument as the given type or return an error
+    pub fn pop_parse<A>(&mut self, name: &str) -> anyhow::Result<A>
+    where
+        A: FromStr,
+        <A as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+    {
         let Some(arg) = self.args.pop_front().and_then(|a| a.into_bytes()) else {
             bail!("{}: {name} argument missing", self.command);
         };
 
         std::str::from_utf8(&arg)
-            .context("invalid integer")?
+            .with_context(|| format!("{name} is invalid"))?
             .parse()
-            .context("invalid integer")
+            .with_context(|| format!("{name} is invalid"))
     }
 
     /// Pop the next argument if it exists
@@ -60,14 +64,18 @@ impl Arguments {
         self.args.pop_front().and_then(|a| a.into_bytes())
     }
 
-    /// Pop and parse the next argument as an i64 if it exists
-    pub fn pop_optional_i64(&mut self) -> anyhow::Result<Option<i64>> {
+    /// Pop and parse the next argument if it exists
+    pub fn pop_optional_parse<A>(&mut self) -> anyhow::Result<Option<A>>
+    where
+        A: FromStr,
+        <A as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+    {
         if let Some(arg) = self.args.pop_front().and_then(|a| a.into_bytes()) {
             return Ok(Some(
                 std::str::from_utf8(&arg)
-                    .context("invalid integer")?
+                    .context("invalid argument")?
                     .parse()
-                    .context("invalid integer")?,
+                    .context("invalid argument")?,
             ));
         }
         Ok(None)
@@ -87,5 +95,10 @@ impl Arguments {
             }
         }
         None
+    }
+
+    /// Get remaining arguments
+    pub fn remaining(&self) -> &VecDeque<RedisValue> {
+        &self.args
     }
 }

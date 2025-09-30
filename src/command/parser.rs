@@ -51,7 +51,7 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
         }
         "RPOP" | "LPOP" => {
             let key = args.pop("key")?;
-            let count = args.pop_optional_i64()?.unwrap_or(1);
+            let count = args.pop_optional_parse()?.unwrap_or(1);
             let dir = match args.command() {
                 "RPOP" => ListDirection::Right,
                 "LPOP" => ListDirection::Left,
@@ -61,12 +61,13 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
         }
         "BRPOP" | "BLPOP" => {
             let key = args.pop("key")?;
+            let timeout = args.pop_parse("timeout")?;
             let dir = match args.command() {
                 "BRPOP" => ListDirection::Right,
                 "BLPOP" => ListDirection::Left,
                 _ => unreachable!(),
             };
-            Command::BPop { key, dir }
+            Command::BPop { key, dir, timeout }
         }
         "LLEN" => {
             let key = args.pop("key")?;
@@ -74,13 +75,17 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
         }
         "LRANGE" => {
             let key = args.pop("key")?;
-            let start = args.pop_i64("start index")?;
-            let stop = args.pop_i64("stop index")?;
+            let start = args.pop_parse("start index")?;
+            let stop = args.pop_parse("stop index")?;
 
             Command::LRange { key, start, stop }
         }
         cmd => bail!("Unrecognized command '{cmd}'"),
     };
+
+    if args.remaining().len() != 0 {
+        bail!("Unrecognized arguments: {:?}", args.remaining());
+    }
 
     Ok(command)
 }

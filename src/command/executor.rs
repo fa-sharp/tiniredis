@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bytes::Bytes;
 use futures::{FutureExt, TryFutureExt};
 use tokio::sync::oneshot;
@@ -46,7 +48,7 @@ pub fn execute_command(
             }
             None => RedisValue::NilString.into(),
         },
-        Command::BPop { key, dir } => match storage.pop(&key, dir, 1) {
+        Command::BPop { key, dir, timeout } => match storage.pop(&key, dir, 1) {
             Some(mut elems) => RedisValue::Array(vec![
                 RedisValue::String(key),
                 RedisValue::String(elems.pop().expect("should have 1 item")),
@@ -56,14 +58,27 @@ pub fn execute_command(
                 let (tx, rx) = oneshot::channel();
                 let key_response = key.clone();
                 queues.bpop_lock().push_back(BPopClient { key, tx, dir });
-                let response = rx
-                    .map_ok(|bytes| {
-                        RedisValue::Array(vec![
-                            RedisValue::String(key_response),
-                            RedisValue::String(bytes),
-                        ])
-                    })
-                    .boxed();
+                let response = match timeout {
+                    0 => rx
+                        .map_ok(|bytes| {
+                            RedisValue::Array(vec![
+                                RedisValue::String(key_response),
+                                RedisValue::String(bytes),
+                            ])
+                        })
+                        .boxed(),
+                    _ => tokio::time::timeout(Duration::from_secs(timeout), rx)
+                        .map(|res| match res {
+                            Ok(Ok(bytes)) => Ok(RedisValue::Array(vec![
+                                RedisValue::String(key_response),
+                                RedisValue::String(bytes),
+                            ])),
+                            Ok(Err(e)) => Err(e),
+                            Err(_) => Ok(RedisValue::NilArray),
+                        })
+                        .boxed(),
+                };
+
                 CommandResponse::Block(response)
             }
         },
