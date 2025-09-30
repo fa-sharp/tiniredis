@@ -59,7 +59,7 @@ impl Arguments {
             .with_context(|| format!("{name} is invalid"))
     }
 
-    /// Pop the next argument if it exists
+    /// Pop the next argument as bytes if it exists
     pub fn pop_optional(&mut self) -> Option<Bytes> {
         self.args.pop_front().and_then(|a| a.into_bytes())
     }

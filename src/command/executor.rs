@@ -102,5 +102,9 @@ pub fn execute_command(
             let elems = storage.lrange(&key, start, stop);
             RedisValue::Array(elems.into_iter().map(RedisValue::String).collect()).into()
         }
+        Command::XAdd { key, id, data } => match storage.xadd(key, id, data) {
+            Ok(id) => RedisValue::String(id).into(),
+            Err(err) => RedisValue::Error(err).into(),
+        },
     }
 }

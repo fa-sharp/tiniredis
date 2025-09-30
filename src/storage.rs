@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use bytes::Bytes;
 use tokio::time::Instant;
@@ -19,6 +19,7 @@ pub trait Storage {
     fn pop(&mut self, key: &Bytes, dir: ListDirection, count: i64) -> Option<Vec<Bytes>>;
     fn llen(&self, key: &Bytes) -> i64;
     fn lrange(&self, key: &Bytes, start: i64, stop: i64) -> Vec<Bytes>;
+    fn xadd(&mut self, key: Bytes, id: Bytes, data: Vec<(Bytes, Bytes)>) -> Result<Bytes, Bytes>;
     fn size(&self) -> i64;
     fn flush(&mut self);
     fn cleanup_expired(&mut self);
@@ -33,10 +34,10 @@ pub enum ListDirection {
     Right,
 }
 
-/// Memory storage implementation using BTreeMap
+/// Memory storage implementation using a HashMap
 #[derive(Debug, Default)]
 pub struct MemoryStorage {
-    data: BTreeMap<Bytes, RedisObject>,
+    data: HashMap<Bytes, RedisObject>,
 }
 
 /// Redis object stored in memory
@@ -55,6 +56,7 @@ pub struct RedisObject {
 pub enum RedisDataType {
     String(Bytes),
     List(VecDeque<Bytes>),
+    Stream(BTreeMap<Bytes, Vec<(Bytes, Bytes)>>),
 }
 
 impl Storage for MemoryStorage {
@@ -75,6 +77,7 @@ impl Storage for MemoryStorage {
             Some(data_type) => match data_type {
                 RedisDataType::String(_) => Bytes::from_static(b"string"),
                 RedisDataType::List(_) => Bytes::from_static(b"list"),
+                RedisDataType::Stream(_) => Bytes::from_static(b"stream"),
             },
             None => Bytes::from_static(b"none"),
         }
@@ -104,7 +107,7 @@ impl Storage for MemoryStorage {
         dir: ListDirection,
     ) -> Result<i64, Bytes> {
         let entry = self.get_entry_with_default(key.clone(), RedisObject::new_list);
-        let response = if let RedisDataType::List(ref mut vec) = entry.data {
+        if let RedisDataType::List(ref mut vec) = entry.data {
             match dir {
                 ListDirection::Right => vec.extend(elems),
                 ListDirection::Left => {
@@ -116,9 +119,7 @@ impl Storage for MemoryStorage {
             Ok(vec.len().try_into().unwrap_or_default())
         } else {
             Err(Bytes::from_static(b"Not a list"))
-        };
-
-        response
+        }
     }
 
     fn pop(&mut self, key: &Bytes, dir: ListDirection, count: i64) -> Option<Vec<Bytes>> {
@@ -184,6 +185,16 @@ impl Storage for MemoryStorage {
         list.range(beg..=end).cloned().collect()
     }
 
+    fn xadd(&mut self, key: Bytes, id: Bytes, data: Vec<(Bytes, Bytes)>) -> Result<Bytes, Bytes> {
+        let entry = self.get_entry_with_default(key, RedisObject::new_stream);
+        if let RedisDataType::Stream(ref mut map) = entry.data {
+            map.insert(id.clone(), data);
+            Ok(id)
+        } else {
+            Err(Bytes::from_static(b"Not a stream"))
+        }
+    }
+
     fn size(&self) -> i64 {
         let count = self.data.values().filter(|o| o.is_current()).count();
         count.try_into().unwrap_or_default()
@@ -243,6 +254,10 @@ impl RedisObject {
 
     pub fn new_list() -> Self {
         Self::new(RedisDataType::List(VecDeque::with_capacity(1)))
+    }
+
+    pub fn new_stream() -> Self {
+        Self::new(RedisDataType::Stream(BTreeMap::new()))
     }
 
     pub fn new_with_ttl(data: RedisDataType, ttl_millis: Option<u64>) -> Self {

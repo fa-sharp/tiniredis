@@ -64,6 +64,11 @@ pub enum Command {
         start: i64,
         stop: i64,
     },
+    XAdd {
+        key: Bytes,
+        id: Bytes,
+        data: Vec<(Bytes, Bytes)>,
+    },
 }
 
 /// The possible responses from a command
