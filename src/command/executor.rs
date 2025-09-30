@@ -106,6 +106,7 @@ pub fn execute_command(
             Ok(id) => RedisValue::String(format_stream_key(id)).into(),
             Err(err) => RedisValue::Error(err).into(),
         },
+        Command::XLen { key } => RedisValue::Int(storage.xlen(&key)).into(),
         Command::XRange { key, start, end } => match storage.xrange(&key, &start, &end) {
             Ok(entries) => RedisValue::Array(
                 entries

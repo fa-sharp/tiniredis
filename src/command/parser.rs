@@ -86,10 +86,9 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
                 timeout_millis,
             }
         }
-        "LLEN" => {
-            let key = args.pop("key")?;
-            Command::LLen { key }
-        }
+        "LLEN" => Command::LLen {
+            key: args.pop("key")?,
+        },
         "LRANGE" => {
             let key = args.pop("key")?;
             let start = args.pop_parse("start index")?;
@@ -105,6 +104,9 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             }
             Command::XAdd { key, id, data }
         }
+        "XLEN" => Command::XLen {
+            key: args.pop("key")?,
+        },
         "XRANGE" => {
             let key = args.pop("key")?;
             let start = args.pop("start")?;

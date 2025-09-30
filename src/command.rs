@@ -69,6 +69,9 @@ pub enum Command {
         id: Bytes,
         data: Vec<(Bytes, Bytes)>,
     },
+    XLen {
+        key: Bytes,
+    },
     XRange {
         key: Bytes,
         start: Bytes,
