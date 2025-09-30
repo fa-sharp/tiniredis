@@ -69,6 +69,11 @@ pub enum Command {
         id: Bytes,
         data: Vec<(Bytes, Bytes)>,
     },
+    XRange {
+        key: Bytes,
+        start: Bytes,
+        end: Bytes,
+    },
 }
 
 /// The possible responses from a command

@@ -103,8 +103,13 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             while let (Some(field), Some(value)) = (args.pop_optional(), args.pop_optional()) {
                 data.push((field, value));
             }
-
             Command::XAdd { key, id, data }
+        }
+        "XRANGE" => {
+            let key = args.pop("key")?;
+            let start = args.pop("start")?;
+            let end = args.pop("end")?;
+            Command::XRange { key, start, end }
         }
         cmd => bail!("Unrecognized command '{cmd}'"),
     };

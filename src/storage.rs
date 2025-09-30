@@ -28,6 +28,12 @@ pub trait Storage {
         id: Bytes,
         data: Vec<(Bytes, Bytes)>,
     ) -> Result<(u64, u64), Bytes>;
+    fn xrange(
+        &self,
+        key: &Bytes,
+        start: &Bytes,
+        end: &Bytes,
+    ) -> Result<Vec<((u64, u64), Vec<(Bytes, Bytes)>)>, Bytes>;
     fn size(&self) -> i64;
     fn flush(&mut self);
     fn cleanup_expired(&mut self);
@@ -199,43 +205,23 @@ impl Storage for MemoryStorage {
         id: Bytes,
         data: Vec<(Bytes, Bytes)>,
     ) -> Result<(u64, u64), Bytes> {
-        const INVALID_ID: Bytes = Bytes::from_static(b"ERR invalid ID");
-        const MIN_ID: (u64, u64) = (0, 0);
-
         // Validate/generate ID
+        const MIN_ID: (u64, u64) = (0, 0);
         let min_id = if let Some(RedisDataType::Stream(map)) = self.get(&key) {
             map.last_key_value().map(|(id, _)| *id).unwrap_or(MIN_ID)
         } else {
             MIN_ID
         };
-        let id = {
-            let mut id_split = id.splitn(2, |b| *b == b'-');
-            let ms: u64 = match std::str::from_utf8(id_split.next().expect("first split"))
-                .map_err(|_| INVALID_ID)?
-            {
-                "*" => SystemTime::now()
+        let id = parse_stream_id(
+            &id,
+            Some(|| {
+                SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
-                    .as_millis() as u64,
-                ms => ms.parse().map_err(|_| INVALID_ID)?,
-            };
-            let seq: u64 = match id_split
-                .next()
-                .map(std::str::from_utf8)
-                .transpose()
-                .map_err(|_| INVALID_ID)?
-            {
-                Some("*") | None => {
-                    if ms == min_id.0 {
-                        min_id.1 + 1
-                    } else {
-                        0
-                    }
-                }
-                Some(seq) => seq.parse().map_err(|_| INVALID_ID)?,
-            };
-            (ms, seq)
-        };
+                    .as_millis() as u64
+            }),
+            |ms| if ms == min_id.0 { min_id.1 + 1 } else { 0 },
+        )?;
         if id == (0, 0) {
             return Err(Bytes::from_static(
                 b"ERR The ID specified in XADD must be greater than 0-0",
@@ -256,6 +242,26 @@ impl Storage for MemoryStorage {
         Ok(id)
     }
 
+    fn xrange(
+        &self,
+        key: &Bytes,
+        start: &Bytes,
+        end: &Bytes,
+    ) -> Result<Vec<((u64, u64), Vec<(Bytes, Bytes)>)>, Bytes> {
+        let start = parse_stream_id(start, None, |_| 0)?;
+        let end = parse_stream_id(end, None, |_| u64::MAX)?;
+        if start > end {
+            Ok(Vec::new())
+        } else if let Some(RedisDataType::Stream(map)) = self.get(&key) {
+            Ok(map
+                .range(start..=end)
+                .map(|(id, data)| (*id, data.to_owned()))
+                .collect())
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
     fn size(&self) -> i64 {
         let count = self.data.values().filter(|o| o.is_current()).count();
         count.try_into().unwrap_or_default()
@@ -268,6 +274,34 @@ impl Storage for MemoryStorage {
     fn cleanup_expired(&mut self) {
         self.data.retain(|_, o| o.is_current());
     }
+}
+
+const INVALID_ID: Bytes = Bytes::from_static(b"ERR invalid ID");
+
+fn parse_stream_id<S>(
+    raw: &Bytes,
+    default_ms: Option<fn() -> u64>,
+    default_seq: S,
+) -> Result<(u64, u64), Bytes>
+where
+    S: Fn(u64) -> u64,
+{
+    let mut id_split = raw.splitn(2, |b| *b == b'-');
+    let ms: u64 =
+        match std::str::from_utf8(id_split.next().expect("first split")).map_err(|_| INVALID_ID)? {
+            "*" => default_ms.ok_or(INVALID_ID)?(),
+            ms => ms.parse().map_err(|_| INVALID_ID)?,
+        };
+    let seq: u64 = match id_split
+        .next()
+        .map(std::str::from_utf8)
+        .transpose()
+        .map_err(|_| INVALID_ID)?
+    {
+        Some("*") | None => default_seq(ms),
+        Some(seq) => seq.parse().map_err(|_| INVALID_ID)?,
+    };
+    Ok((ms, seq))
 }
 
 impl MemoryStorage {

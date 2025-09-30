@@ -73,6 +73,7 @@ pub fn execute_command(
                 let (tx, rx) = oneshot::channel();
                 let key_response = key.clone();
                 queues.bpop_lock().push_back(BPopClient { key, tx, dir });
+
                 let response = match timeout_millis {
                     0 => rx
                         .map_ok(|bytes| {
@@ -93,7 +94,6 @@ pub fn execute_command(
                         })
                         .boxed(),
                 };
-
                 CommandResponse::Block(response)
             }
         },
@@ -103,8 +103,33 @@ pub fn execute_command(
             RedisValue::Array(elems.into_iter().map(RedisValue::String).collect()).into()
         }
         Command::XAdd { key, id, data } => match storage.xadd(key, id, data) {
-            Ok((ms, seq)) => RedisValue::String(format!("{ms}-{seq}").into()).into(),
+            Ok(id) => RedisValue::String(format_stream_key(id)).into(),
+            Err(err) => RedisValue::Error(err).into(),
+        },
+        Command::XRange { key, start, end } => match storage.xrange(&key, &start, &end) {
+            Ok(entries) => RedisValue::Array(
+                entries
+                    .into_iter()
+                    .map(|(id, data)| {
+                        RedisValue::Array(vec![
+                            RedisValue::String(format_stream_key(id)),
+                            RedisValue::Array(
+                                data.into_iter()
+                                    .flat_map(|(field, value)| {
+                                        [RedisValue::String(field), RedisValue::String(value)]
+                                    })
+                                    .collect(),
+                            ),
+                        ])
+                    })
+                    .collect(),
+            )
+            .into(),
             Err(err) => RedisValue::Error(err).into(),
         },
     }
+}
+
+fn format_stream_key((ms, seq): (u64, u64)) -> Bytes {
+    Bytes::from([ms.to_string().as_bytes(), b"-", seq.to_string().as_bytes()].concat())
 }
