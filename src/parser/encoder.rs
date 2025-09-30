@@ -2,7 +2,7 @@
 
 use bytes::BufMut;
 use tokio_util::codec::Encoder;
-use tracing::debug;
+use tracing::trace;
 
 use super::*;
 
@@ -54,7 +54,7 @@ impl Encoder<RedisValue> for RespEncoder {
             }
         }
 
-        debug!(
+        trace!(
             "Building raw value: {}",
             String::from_utf8_lossy(dst).escape_debug()
         );

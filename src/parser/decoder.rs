@@ -1,7 +1,7 @@
 //! RESP decoder
 
 use tokio_util::codec::Decoder;
-use tracing::debug;
+use tracing::trace;
 
 use super::*;
 
@@ -17,7 +17,7 @@ impl Decoder for RespDecoder {
             return Ok(None);
         }
 
-        debug!(
+        trace!(
             "Receiving raw value: {}",
             String::from_utf8_lossy(buf).escape_debug()
         );

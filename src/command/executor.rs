@@ -103,7 +103,7 @@ pub fn execute_command(
             RedisValue::Array(elems.into_iter().map(RedisValue::String).collect()).into()
         }
         Command::XAdd { key, id, data } => match storage.xadd(key, id, data) {
-            Ok(id) => RedisValue::String(id).into(),
+            Ok((ms, seq)) => RedisValue::String(format!("{ms}-{seq}").into()).into(),
             Err(err) => RedisValue::Error(err).into(),
         },
     }

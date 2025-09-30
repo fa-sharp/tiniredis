@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use anyhow::bail;
+use anyhow::{anyhow, bail, Context};
 
 use super::Command;
 use crate::{arguments::Arguments, storage::ListDirection};
@@ -103,7 +103,23 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             while let (Some(field), Some(value)) = (args.pop_optional(), args.pop_optional()) {
                 data.push((field, value));
             }
-            Command::XAdd { key, id, data }
+
+            // Validate ID as `u64-u64`
+            let mut id_split = id.splitn(2, |b| *b == b'-');
+            let ms: u64 = std::str::from_utf8(id_split.next().expect("first split"))
+                .context("Invalid ID")?
+                .parse()
+                .context("Invalid ID")?;
+            let seq: u64 = std::str::from_utf8(id_split.next().ok_or(anyhow!("Invalid ID"))?)
+                .context("Invalid ID")?
+                .parse()
+                .context("Invalid ID")?;
+
+            Command::XAdd {
+                key,
+                id: (ms, seq),
+                data,
+            }
         }
         cmd => bail!("Unrecognized command '{cmd}'"),
     };

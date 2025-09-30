@@ -19,7 +19,12 @@ pub trait Storage {
     fn pop(&mut self, key: &Bytes, dir: ListDirection, count: i64) -> Option<Vec<Bytes>>;
     fn llen(&self, key: &Bytes) -> i64;
     fn lrange(&self, key: &Bytes, start: i64, stop: i64) -> Vec<Bytes>;
-    fn xadd(&mut self, key: Bytes, id: Bytes, data: Vec<(Bytes, Bytes)>) -> Result<Bytes, Bytes>;
+    fn xadd(
+        &mut self,
+        key: Bytes,
+        id: (u64, u64),
+        data: Vec<(Bytes, Bytes)>,
+    ) -> Result<(u64, u64), Bytes>;
     fn size(&self) -> i64;
     fn flush(&mut self);
     fn cleanup_expired(&mut self);
@@ -56,7 +61,7 @@ pub struct RedisObject {
 pub enum RedisDataType {
     String(Bytes),
     List(VecDeque<Bytes>),
-    Stream(BTreeMap<Bytes, Vec<(Bytes, Bytes)>>),
+    Stream(BTreeMap<(u64, u64), Vec<(Bytes, Bytes)>>),
 }
 
 impl Storage for MemoryStorage {
@@ -185,14 +190,33 @@ impl Storage for MemoryStorage {
         list.range(beg..=end).cloned().collect()
     }
 
-    fn xadd(&mut self, key: Bytes, id: Bytes, data: Vec<(Bytes, Bytes)>) -> Result<Bytes, Bytes> {
-        let entry = self.get_entry_with_default(key, RedisObject::new_stream);
-        if let RedisDataType::Stream(ref mut map) = entry.data {
-            map.insert(id.clone(), data);
-            Ok(id)
-        } else {
-            Err(Bytes::from_static(b"Not a stream"))
+    fn xadd(
+        &mut self,
+        key: Bytes,
+        id: (u64, u64),
+        data: Vec<(Bytes, Bytes)>,
+    ) -> Result<(u64, u64), Bytes> {
+        // Validate ID
+        if id == (0, 0) {
+            return Err(Bytes::from_static(
+                b"The ID specified in XADD must be greater than 0-0",
+            ));
         }
+        if let Some(RedisDataType::Stream(map)) = self.get(&key) {
+            if let Some((last_id, _)) = map.last_key_value() {
+                if id <= *last_id {
+                    return Err(Bytes::from_static(b"The ID specified in XADD is equal or smaller than the target stream top item"));
+                }
+            }
+        }
+
+        // Insert entry into stream, creating a new stream if needed
+        let entry = self.get_entry_with_default(key, RedisObject::new_stream);
+        let RedisDataType::Stream(ref mut map) = entry.data else {
+            return Err(Bytes::from_static(b"Not a stream"));
+        };
+        map.insert(id, data);
+        Ok(id)
     }
 
     fn size(&self) -> i64 {

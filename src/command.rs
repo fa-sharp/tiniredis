@@ -66,7 +66,7 @@ pub enum Command {
     },
     XAdd {
         key: Bytes,
-        id: Bytes,
+        id: (u64, u64),
         data: Vec<(Bytes, Bytes)>,
     },
 }
