@@ -21,6 +21,6 @@ pub async fn cleanup_task(
         }
         debug!("cleanup task running");
         storage.lock().unwrap().cleanup_expired();
-        queues.bpop_lock().retain(|client| !client.tx.is_closed());
+        queues.cleanup_disconnected();
     }
 }

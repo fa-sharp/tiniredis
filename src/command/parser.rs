@@ -20,16 +20,12 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
         "SET" => {
             let key = args.pop("key")?;
             let val = args.pop("value")?;
-            let ex = args.pop_optional_named("EX");
-            let px = args.pop_optional_named("PX");
+            let ex: Option<u64> = args.pop_parse_optional_named("EX")?;
+            let px: Option<u64> = args.pop_parse_optional_named("PX")?;
             let ttl = match (ex, px) {
                 (None, None) => None,
-                (Some(ex), None) => Some(
-                    std::str::from_utf8(&ex)?
-                        .parse::<u64>()
-                        .map(|secs| secs * 1000)?,
-                ),
-                (None, Some(px)) => Some(std::str::from_utf8(&px)?.parse()?),
+                (Some(ex), None) => Some(ex * 1000),
+                (None, Some(px)) => Some(px),
                 (Some(_), Some(_)) => bail!("can't provide both EX and PX"),
             };
             Command::Set { key, val, ttl }
@@ -63,7 +59,7 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
         }
         "RPOP" | "LPOP" => {
             let key = args.pop("key")?;
-            let count = args.pop_optional_parse()?.unwrap_or(1);
+            let count = args.pop_parse_optional()?.unwrap_or(1);
             let dir = match args.command() {
                 "RPOP" => ListDirection::Right,
                 "LPOP" => ListDirection::Left,
@@ -114,6 +110,7 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             Command::XRange { key, start, end }
         }
         "XREAD" => {
+            let block = args.pop_parse_optional_named("block")?;
             match args.pop("streams")?.to_ascii_uppercase().as_slice() {
                 b"STREAMS" => {}
                 _ => bail!("STREAMS keyword is required"),
@@ -132,7 +129,7 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             let (keys, ids) = keys_and_ids.split_at(keys_and_ids.len() / 2);
             let streams = keys.iter().cloned().zip(ids.iter().cloned()).collect();
 
-            Command::XRead { streams }
+            Command::XRead { streams, block }
         }
         cmd => bail!("Unrecognized command '{cmd}'"),
     };

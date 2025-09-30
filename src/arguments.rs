@@ -65,7 +65,7 @@ impl Arguments {
     }
 
     /// Pop and parse the next argument if it exists
-    pub fn pop_optional_parse<A>(&mut self) -> anyhow::Result<Option<A>>
+    pub fn pop_parse_optional<A>(&mut self) -> anyhow::Result<Option<A>>
     where
         A: FromStr,
         <A as FromStr>::Err: std::error::Error + Send + Sync + 'static,
@@ -82,7 +82,7 @@ impl Arguments {
     }
 
     /// Get optional named argument (e.g. if `EX 123` given for SET, get `123`)
-    pub fn pop_optional_named(&mut self, name: &str) -> Option<Bytes> {
+    pub fn _pop_optional_named(&mut self, name: &str) -> Option<Bytes> {
         if let Some(arg_idx) = self.args.iter().position(|a| {
             if let Some(name_arg) = a.as_bytes() {
                 return name_arg.eq_ignore_ascii_case(name.as_bytes());
@@ -95,6 +95,34 @@ impl Arguments {
             }
         }
         None
+    }
+
+    /// Get and parse optional named argument (e.g. if `EX 123` given for SET, get `123`)
+    pub fn pop_parse_optional_named<A>(&mut self, name: &str) -> anyhow::Result<Option<A>>
+    where
+        A: FromStr,
+        <A as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+    {
+        if let Some(arg_idx) = self.args.iter().position(|a| {
+            if let Some(name_arg) = a.as_bytes() {
+                return name_arg.eq_ignore_ascii_case(name.as_bytes());
+            }
+            false
+        }) {
+            if self.args.get(arg_idx + 1).is_some() {
+                self.args.remove(arg_idx);
+                let arg = self.args.remove(arg_idx).and_then(|a| a.into_bytes());
+                return arg
+                    .as_deref()
+                    .map(std::str::from_utf8)
+                    .transpose()
+                    .with_context(|| format!("invalid {name}"))?
+                    .map(|a| a.parse())
+                    .transpose()
+                    .with_context(|| format!("invalid {name}"));
+            }
+        }
+        Ok(None)
     }
 
     /// Get remaining arguments

@@ -48,11 +48,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Setup channels
     let (bpop_tx, bpop_rx) = mpsc::unbounded_channel();
+    let (xread_tx, xread_rx) = mpsc::unbounded_channel();
 
     // Setup storage, queues, and notifiers
     let storage: Arc<Mutex<MemoryStorage>> = Arc::default();
     let queues: Arc<Queues> = Arc::default();
-    let senders: Arc<Senders> = Arc::new(Senders { bpop: bpop_tx });
+    let senders: Arc<Senders> = Arc::new(Senders {
+        bpop: bpop_tx,
+        xread: xread_tx,
+    });
 
     // Spawn tasks
     let mut all_tasks = JoinSet::new();
@@ -61,6 +65,12 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&storage),
         Arc::clone(&queues),
         bpop_rx,
+        shutdown_sig.clone(),
+    ));
+    all_tasks.spawn(tasks::xread_task(
+        Arc::clone(&storage),
+        Arc::clone(&queues),
+        xread_rx,
         shutdown_sig.clone(),
     ));
     all_tasks.spawn(tasks::cleanup_task(

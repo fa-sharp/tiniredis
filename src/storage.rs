@@ -6,7 +6,7 @@ use std::{
 use bytes::Bytes;
 use tokio::time::Instant;
 
-type StreamEntry = ((u64, u64), Vec<(Bytes, Bytes)>);
+pub type StreamEntry = ((u64, u64), Vec<(Bytes, Bytes)>);
 
 /// Storage interface
 pub trait Storage {

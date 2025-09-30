@@ -79,6 +79,7 @@ pub enum Command {
     },
     XRead {
         streams: Vec<(Bytes, Bytes)>,
+        block: Option<u64>,
     },
 }
 

@@ -8,7 +8,7 @@ use crate::{
     storage::{ListDirection, Storage},
 };
 
-/// A blocking pop client waiting for a value, stored in storage
+/// A blocking pop client waiting for a value
 #[derive(Debug)]
 pub struct BPopClient {
     pub key: Bytes,

@@ -6,7 +6,11 @@ use tokio::sync::oneshot;
 
 use super::{Command, CommandResponse};
 use crate::{
-    parser::RedisValue, queues::Queues, senders::Senders, storage::Storage, tasks::BPopClient,
+    parser::RedisValue,
+    queues::Queues,
+    senders::Senders,
+    storage::{Storage, StreamEntry},
+    tasks::{BPopClient, XReadClient},
 };
 
 pub fn execute_command(
@@ -72,7 +76,7 @@ pub fn execute_command(
             None => {
                 let (tx, rx) = oneshot::channel();
                 let key_response = key.clone();
-                queues.bpop_lock().push_back(BPopClient { key, tx, dir });
+                queues.bpop_push(BPopClient { key, tx, dir });
 
                 let response = match timeout_millis {
                     0 => rx
@@ -102,8 +106,11 @@ pub fn execute_command(
             let elems = storage.lrange(&key, start, stop);
             RedisValue::Array(elems.into_iter().map(RedisValue::String).collect()).into()
         }
-        Command::XAdd { key, id, data } => match storage.xadd(key, id, data) {
-            Ok(id) => RedisValue::String(format_stream_id(id)).into(),
+        Command::XAdd { key, id, data } => match storage.xadd(key.clone(), id, data) {
+            Ok(id) => {
+                senders.notify_xread(key); // notify blocking xread clients
+                RedisValue::String(format_stream_id(id)).into()
+            }
             Err(err) => RedisValue::Error(err).into(),
         },
         Command::XLen { key } => RedisValue::Int(storage.xlen(&key)).into(),
@@ -113,9 +120,32 @@ pub fn execute_command(
             }
             Err(err) => RedisValue::Error(err).into(),
         },
-        Command::XRead { streams } => match storage.xread(streams) {
-            Ok(streams) => {
-                RedisValue::Array(streams.into_iter().map(format_stream).collect()).into()
+        Command::XRead { streams, block } => match storage.xread(streams.clone()) {
+            Ok(response) => {
+                if !response.is_empty() {
+                    RedisValue::Array(response.into_iter().map(format_stream).collect()).into()
+                } else if let Some(block_millis) = block {
+                    let (tx, rx) = oneshot::channel();
+                    queues.xread_push(XReadClient {
+                        streams,
+                        tx: Some(tx),
+                    });
+
+                    let block_response =
+                        tokio::time::timeout(Duration::from_millis(block_millis), rx)
+                            .map(|res| match res {
+                                Ok(Ok(Ok(streams))) => Ok(RedisValue::Array(
+                                    streams.into_iter().map(format_stream).collect(), // XREAD response
+                                )),
+                                Ok(Ok(Err(err))) => Ok(RedisValue::Error(err)), // XREAD error
+                                Ok(Err(recv_err)) => Err(recv_err), // Receiver disconnected
+                                Err(_) => Ok(RedisValue::NilArray), // Timeout
+                            })
+                            .boxed();
+                    CommandResponse::Block(block_response)
+                } else {
+                    RedisValue::NilArray.into()
+                }
             }
             Err(err) => RedisValue::Error(err).into(),
         },
@@ -126,7 +156,7 @@ fn format_stream_id((ms, seq): (u64, u64)) -> Bytes {
     Bytes::from([ms.to_string().as_bytes(), b"-", seq.to_string().as_bytes()].concat())
 }
 
-fn format_stream_entry((id, data): ((u64, u64), Vec<(Bytes, Bytes)>)) -> RedisValue {
+fn format_stream_entry((id, data): StreamEntry) -> RedisValue {
     RedisValue::Array(vec![
         RedisValue::String(format_stream_id(id)),
         RedisValue::Array(
@@ -137,7 +167,7 @@ fn format_stream_entry((id, data): ((u64, u64), Vec<(Bytes, Bytes)>)) -> RedisVa
     ])
 }
 
-fn format_stream((key, entries): (Bytes, Vec<((u64, u64), Vec<(Bytes, Bytes)>)>)) -> RedisValue {
+fn format_stream((key, entries): (Bytes, Vec<StreamEntry>)) -> RedisValue {
     RedisValue::Array(vec![
         RedisValue::String(key),
         RedisValue::Array(entries.into_iter().map(format_stream_entry).collect()),
