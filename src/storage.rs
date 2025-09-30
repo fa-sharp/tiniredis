@@ -28,6 +28,7 @@ pub trait Storage {
         id: Bytes,
         data: Vec<(Bytes, Bytes)>,
     ) -> Result<(u64, u64), Bytes>;
+    fn xlen(&self, key: &Bytes) -> i64;
     fn xrange(
         &self,
         key: &Bytes,
@@ -160,10 +161,11 @@ impl Storage for MemoryStorage {
     }
 
     fn llen(&self, key: &Bytes) -> i64 {
-        let Some(RedisDataType::List(list)) = self.get(key) else {
-            return 0;
-        };
-        list.len().try_into().unwrap_or_default()
+        if let Some(RedisDataType::List(list)) = self.get(key) {
+            list.len().try_into().unwrap_or_default()
+        } else {
+            0
+        }
     }
 
     fn lrange(&self, key: &Bytes, start: i64, stop: i64) -> Vec<Bytes> {
@@ -214,12 +216,7 @@ impl Storage for MemoryStorage {
         };
         let id = parse_stream_id(
             &id,
-            Some(|| {
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64
-            }),
+            true,
             |ms| if ms == min_id.0 { min_id.1 + 1 } else { 0 },
         )?;
         if id == (0, 0) {
@@ -242,14 +239,28 @@ impl Storage for MemoryStorage {
         Ok(id)
     }
 
+    fn xlen(&self, key: &Bytes) -> i64 {
+        if let Some(RedisDataType::Stream(map)) = self.get(&key) {
+            map.len().try_into().unwrap_or_default()
+        } else {
+            0
+        }
+    }
+
     fn xrange(
         &self,
         key: &Bytes,
         start: &Bytes,
         end: &Bytes,
     ) -> Result<Vec<((u64, u64), Vec<(Bytes, Bytes)>)>, Bytes> {
-        let start = parse_stream_id(start, None, |_| 0)?;
-        let end = parse_stream_id(end, None, |_| u64::MAX)?;
+        let start = match start.as_ref() {
+            b"-" => (0, 0),
+            _ => parse_stream_id(start, false, |_| 0)?,
+        };
+        let end = match end.as_ref() {
+            b"+" => (u64::MAX, u64::MAX),
+            _ => parse_stream_id(end, false, |_| u64::MAX)?,
+        };
         if start > end {
             Ok(Vec::new())
         } else if let Some(RedisDataType::Stream(map)) = self.get(&key) {
@@ -278,18 +289,14 @@ impl Storage for MemoryStorage {
 
 const INVALID_ID: Bytes = Bytes::from_static(b"ERR invalid ID");
 
-fn parse_stream_id<S>(
-    raw: &Bytes,
-    default_ms: Option<fn() -> u64>,
-    default_seq: S,
-) -> Result<(u64, u64), Bytes>
+fn parse_stream_id<S>(raw: &Bytes, generate_ms: bool, default_seq: S) -> Result<(u64, u64), Bytes>
 where
     S: Fn(u64) -> u64,
 {
     let mut id_split = raw.splitn(2, |b| *b == b'-');
     let ms: u64 =
         match std::str::from_utf8(id_split.next().expect("first split")).map_err(|_| INVALID_ID)? {
-            "*" => default_ms.ok_or(INVALID_ID)?(),
+            "*" => generate_ms.then(gen_stream_id_ms).ok_or(INVALID_ID)?,
             ms => ms.parse().map_err(|_| INVALID_ID)?,
         };
     let seq: u64 = match id_split
@@ -302,6 +309,13 @@ where
         Some(seq) => seq.parse().map_err(|_| INVALID_ID)?,
     };
     Ok((ms, seq))
+}
+
+fn gen_stream_id_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64
 }
 
 impl MemoryStorage {

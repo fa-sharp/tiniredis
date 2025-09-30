@@ -2,7 +2,6 @@ use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot, watch};
-use tracing::warn;
 
 use crate::{
     queues::Queues,
@@ -31,10 +30,7 @@ pub async fn bpop_task(
             opt = bpop_rx.recv()=> {
                 match opt {
                     Some(key) => key,
-                    None => {
-                        warn!("bpop task sender was dropped");
-                        break;
-                    },
+                    None => break,
                 }
             },
             _ = shutdown.changed() => break
@@ -46,20 +42,21 @@ pub async fn bpop_task(
 
         // Iterate over the bpop queue, looking for blocking clients waiting on this key.
         while let Some(client_idx) = bpop_queue.iter().position(|c| c.key == key) {
-            let direction = bpop_queue[client_idx].dir;
+            // Check if this client's channel/receiver has been dropped
+            if bpop_queue[client_idx].tx.is_closed() {
+                bpop_queue.remove(client_idx);
+                continue;
+            }
+
             // Pop the element with the client's chosen direction
+            let direction = bpop_queue[client_idx].dir;
             if let Some(mut popped) = storage_lock.pop(&key, direction, 1) {
                 // Remove the blocking client from the queue
-                let client = bpop_queue.remove(client_idx).expect("valid");
-                let elem = popped.pop().expect("should have 1 item");
+                let client = bpop_queue.remove(client_idx).expect("valid idx");
+                let elem = popped.pop().expect("pop() should return 1 item");
 
                 // Send the response to client
-                if let Err(elem) = client.tx.send(elem) {
-                    // client was dropped, push elem back onto list
-                    storage_lock
-                        .push(key.clone(), vec![elem].into(), direction)
-                        .expect("should be a list");
-                }
+                client.tx.send(elem).ok();
             } else {
                 // No more elements in list
                 break;
