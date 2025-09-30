@@ -32,6 +32,9 @@ pub enum Command {
         val: Bytes,
         ttl: Option<u64>,
     },
+    Type {
+        key: Bytes,
+    },
     Ttl {
         key: Bytes,
     },

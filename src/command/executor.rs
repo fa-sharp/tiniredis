@@ -31,6 +31,7 @@ pub fn execute_command(
             storage.set(key, val, ttl);
             RedisValue::SimpleString(Bytes::from_static(b"OK")).into()
         }
+        Command::Type { key } => RedisValue::SimpleString(storage.kind(&key)).into(),
         Command::Ttl { key } => RedisValue::Int(storage.ttl(&key)).into(),
         Command::Del { keys } => {
             let mut count = 0;

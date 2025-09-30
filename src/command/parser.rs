@@ -14,10 +14,9 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             let message = args.pop("message")?;
             Command::Echo { message }
         }
-        "GET" => {
-            let key = args.pop("key")?;
-            Command::Get { key }
-        }
+        "GET" => Command::Get {
+            key: args.pop("key")?,
+        },
         "SET" => {
             let key = args.pop("key")?;
             let val = args.pop("value")?;
@@ -35,10 +34,12 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             };
             Command::Set { key, val, ttl }
         }
-        "TTL" => {
-            let key = args.pop("key")?;
-            Command::Ttl { key }
-        }
+        "TYPE" => Command::Type {
+            key: args.pop("key")?,
+        },
+        "TTL" => Command::Ttl {
+            key: args.pop("key")?,
+        },
         "DEL" => {
             let mut keys = vec![args.pop("key")?];
             while let Some(key) = args.pop_optional() {

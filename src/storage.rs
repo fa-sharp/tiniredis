@@ -8,6 +8,7 @@ pub trait Storage {
     fn get(&self, key: &Bytes) -> Option<Bytes>;
     fn set(&mut self, key: Bytes, val: Bytes, ttl_millis: Option<u64>);
     fn ttl(&self, key: &Bytes) -> i64;
+    fn kind(&self, key: &Bytes) -> Bytes;
     fn del(&mut self, key: &Bytes) -> bool;
     fn push(
         &mut self,
@@ -67,6 +68,16 @@ impl Storage for MemoryStorage {
     fn set(&mut self, key: Bytes, val: Bytes, ttl_millis: Option<u64>) {
         let object = RedisObject::new_with_ttl(RedisDataType::String(val), ttl_millis);
         self.data.insert(key, object);
+    }
+
+    fn kind(&self, key: &Bytes) -> Bytes {
+        match self.get(key) {
+            Some(data_type) => match data_type {
+                RedisDataType::String(_) => Bytes::from_static(b"string"),
+                RedisDataType::List(_) => Bytes::from_static(b"list"),
+            },
+            None => Bytes::from_static(b"none"),
+        }
     }
 
     fn ttl(&self, key: &Bytes) -> i64 {
@@ -188,14 +199,14 @@ impl Storage for MemoryStorage {
 }
 
 impl MemoryStorage {
-    /// Get a reference for the object at the given key. Will return `None` if missing or expired.
+    /// Get a reference for the object data at the given key. Will return `None` if missing or expired.
     fn get(&self, key: &Bytes) -> Option<&RedisDataType> {
         self.data
             .get(key)
             .and_then(|o| o.is_current().then_some(&o.data))
     }
 
-    /// Get a mutable reference for the object at the given key. Will return `None` if missing or expired.
+    /// Get a mutable reference for the object data at the given key. Will return `None` if missing or expired.
     fn get_mut(&mut self, key: &Bytes) -> Option<&mut RedisDataType> {
         self.data
             .get_mut(key)
