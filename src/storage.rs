@@ -14,8 +14,10 @@ pub trait Storage {
         dir: ListDirection,
     ) -> Result<i64, Bytes>;
     fn pop(&mut self, key: &Bytes, dir: ListDirection, count: i64) -> Option<Vec<Bytes>>;
-    fn lrange(&self, key: Bytes, start: i64, stop: i64) -> Vec<Bytes>;
+    fn llen(&self, key: &Bytes) -> i64;
+    fn lrange(&self, key: &Bytes, start: i64, stop: i64) -> Vec<Bytes>;
     fn size(&self) -> i64;
+    fn flush(&mut self);
     fn cleanup_expired(&mut self);
 }
 
@@ -112,8 +114,15 @@ impl Storage for MemoryStorage {
         Some(elems)
     }
 
-    fn lrange(&self, key: Bytes, start: i64, stop: i64) -> Vec<Bytes> {
-        let Some(RedisDataType::List(list)) = self.get(&key) else {
+    fn llen(&self, key: &Bytes) -> i64 {
+        let Some(RedisDataType::List(list)) = self.get(key) else {
+            return 0;
+        };
+        list.len().try_into().unwrap_or_default()
+    }
+
+    fn lrange(&self, key: &Bytes, start: i64, stop: i64) -> Vec<Bytes> {
+        let Some(RedisDataType::List(list)) = self.get(key) else {
             return Vec::new();
         };
 
@@ -148,6 +157,10 @@ impl Storage for MemoryStorage {
     fn size(&self) -> i64 {
         let count = self.data.values().filter(|o| o.is_current()).count();
         count.try_into().unwrap_or_default()
+    }
+
+    fn flush(&mut self) {
+        self.data.clear();
     }
 
     fn cleanup_expired(&mut self) {
