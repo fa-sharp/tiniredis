@@ -10,12 +10,11 @@ mod decoder;
 mod encoder;
 mod errors;
 
-pub use decoder::RespParser;
+pub use decoder::RespDecoder;
 pub use encoder::RespEncoder;
 pub use errors::RedisParseError;
 
 use bytes::{Bytes, BytesMut};
-use memchr::memchr;
 
 /// Represents a parsed Redis value, or a value that can be sent as a response
 #[derive(Debug)]

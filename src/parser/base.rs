@@ -10,11 +10,11 @@ pub fn word(buf: &BytesMut, pos: usize) -> Option<(BufWindow, usize)> {
     }
 
     // Look for position of `\n` to find a CRLF
-    if let Some(crlf_pos) = memchr(b'\n', &buf[pos..]) {
+    if let Some(crlf_pos) = memchr::memchr(b'\n', &buf[pos..]) {
         let end_pos = pos + crlf_pos - 1;
-        let split = BufWindow(pos, end_pos);
+        let window = BufWindow(pos, end_pos);
 
-        Some((split, end_pos + constants::CRLF_LEN))
+        Some((window, end_pos + constants::CRLF_LEN))
     } else {
         None
     }

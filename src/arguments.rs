@@ -60,6 +60,19 @@ impl Arguments {
         self.args.pop_front().and_then(|a| a.into_bytes())
     }
 
+    /// Pop and parse the next argument as an i64 if it exists
+    pub fn pop_optional_i64(&mut self) -> anyhow::Result<Option<i64>> {
+        if let Some(arg) = self.args.pop_front().and_then(|a| a.into_bytes()) {
+            return Ok(Some(
+                std::str::from_utf8(&arg)
+                    .context("invalid integer")?
+                    .parse()
+                    .context("invalid integer")?,
+            ));
+        }
+        Ok(None)
+    }
+
     /// Get optional named argument (e.g. if `EX 123` given for SET, get `123`)
     pub fn pop_optional_named(&mut self, name: &str) -> Option<Bytes> {
         if let Some(arg_idx) = self.args.iter().position(|a| {

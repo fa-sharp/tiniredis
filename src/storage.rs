@@ -3,6 +3,37 @@ use std::collections::{BTreeMap, VecDeque};
 use bytes::Bytes;
 use tokio::time::Instant;
 
+/// Storage interface
+pub trait Storage {
+    fn get(&self, key: &Bytes) -> Option<Bytes>;
+    fn set(&mut self, key: Bytes, val: Bytes, ttl_millis: Option<u64>);
+    fn push(
+        &mut self,
+        key: Bytes,
+        elems: VecDeque<Bytes>,
+        dir: ListDirection,
+    ) -> Result<i64, Bytes>;
+    fn pop(&mut self, key: &Bytes, dir: ListDirection, count: i64) -> Option<Vec<Bytes>>;
+    fn lrange(&self, key: Bytes, start: i64, stop: i64) -> Vec<Bytes>;
+    fn size(&self) -> i64;
+    fn cleanup_expired(&mut self);
+}
+
+/// Direction for push/pop operations
+#[derive(Debug, Clone, Copy)]
+pub enum ListDirection {
+    /// Front of the list
+    Left,
+    /// Back of the list
+    Right,
+}
+
+/// Memory storage implementation using BTreeMap
+#[derive(Debug, Default)]
+pub struct MemoryStorage {
+    data: BTreeMap<Bytes, RedisObject>,
+}
+
 /// Redis object stored in memory
 #[derive(Debug)]
 pub struct RedisObject {
@@ -21,29 +52,12 @@ pub enum RedisDataType {
     List(VecDeque<Bytes>),
 }
 
-pub trait Storage {
-    fn get(&self, key: &Bytes) -> Option<Bytes>;
-    fn set(&mut self, key: Bytes, val: Bytes, ttl_millis: Option<u64>);
-    fn rpush(&mut self, key: Bytes, elem: Bytes, elems: Vec<Bytes>) -> Result<i64, Bytes>;
-    fn lpush(&mut self, key: Bytes, elem: Bytes, elems: Vec<Bytes>) -> Result<i64, Bytes>;
-    fn lrange(&self, key: Bytes, start: i64, stop: i64) -> Vec<Bytes>;
-    fn cleanup(&mut self);
-}
-
-#[derive(Default)]
-pub struct MemoryStorage {
-    data: BTreeMap<Bytes, RedisObject>,
-}
-
 impl Storage for MemoryStorage {
     fn get(&self, key: &Bytes) -> Option<Bytes> {
-        self.data
-            .get(key)
-            .filter(|o| o.is_current())
-            .and_then(|o| match &o.data {
-                RedisDataType::String(bytes) => Some(bytes.clone()),
-                _ => None,
-            })
+        match self.get(key) {
+            Some(RedisDataType::String(bytes)) => Some(bytes.clone()),
+            _ => None,
+        }
     }
 
     fn set(&mut self, key: Bytes, val: Bytes, ttl_millis: Option<u64>) {
@@ -51,35 +65,55 @@ impl Storage for MemoryStorage {
         self.data.insert(key, object);
     }
 
-    fn rpush(&mut self, key: Bytes, elem: Bytes, elems: Vec<Bytes>) -> Result<i64, Bytes> {
-        let entry = self.get_entry_with_default(key, RedisObject::new_list);
-        if let RedisDataType::List(ref mut vec) = entry.data {
-            vec.push_back(elem);
-            vec.extend(elems);
-            Ok(vec.len().try_into().unwrap_or_default())
-        } else {
-            Err(Bytes::from_static(b"Not a list"))
-        }
-    }
-
-    fn lpush(&mut self, key: Bytes, elem: Bytes, elems: Vec<Bytes>) -> Result<i64, Bytes> {
-        let entry = self.get_entry_with_default(key, RedisObject::new_list);
-        if let RedisDataType::List(ref mut vec) = entry.data {
-            vec.push_front(elem);
-            for elem in elems {
-                vec.push_front(elem);
+    fn push(
+        &mut self,
+        key: Bytes,
+        elems: VecDeque<Bytes>,
+        dir: ListDirection,
+    ) -> Result<i64, Bytes> {
+        let entry = self.get_entry_with_default(key.clone(), RedisObject::new_list);
+        let response = if let RedisDataType::List(ref mut vec) = entry.data {
+            match dir {
+                ListDirection::Right => vec.extend(elems),
+                ListDirection::Left => {
+                    for elem in elems {
+                        vec.push_front(elem);
+                    }
+                }
             }
             Ok(vec.len().try_into().unwrap_or_default())
         } else {
             Err(Bytes::from_static(b"Not a list"))
+        };
+
+        response
+    }
+
+    fn pop(&mut self, key: &Bytes, dir: ListDirection, count: i64) -> Option<Vec<Bytes>> {
+        let Some(RedisDataType::List(vec)) = self.get_mut(key) else {
+            return None;
+        };
+        let mut elems = Vec::new();
+        for _ in 0..count {
+            if let Some(elem) = match dir {
+                ListDirection::Left => vec.pop_front(),
+                ListDirection::Right => vec.pop_back(),
+            } {
+                elems.push(elem);
+            } else {
+                break;
+            }
         }
+
+        if vec.is_empty() {
+            self.data.remove(key);
+        }
+
+        Some(elems)
     }
 
     fn lrange(&self, key: Bytes, start: i64, stop: i64) -> Vec<Bytes> {
-        let Some(obj) = self.data.get(&key) else {
-            return Vec::new();
-        };
-        let RedisDataType::List(ref list) = obj.data else {
+        let Some(RedisDataType::List(list)) = self.get(&key) else {
             return Vec::new();
         };
 
@@ -111,12 +145,31 @@ impl Storage for MemoryStorage {
         list.range(beg..=end).cloned().collect()
     }
 
-    fn cleanup(&mut self) {
+    fn size(&self) -> i64 {
+        let count = self.data.values().filter(|o| o.is_current()).count();
+        count.try_into().unwrap_or_default()
+    }
+
+    fn cleanup_expired(&mut self) {
         self.data.retain(|_, o| o.is_current());
     }
 }
 
 impl MemoryStorage {
+    /// Get a reference for the object at the given key. Will return `None` if missing or expired.
+    fn get(&self, key: &Bytes) -> Option<&RedisDataType> {
+        self.data
+            .get(key)
+            .and_then(|o| o.is_current().then_some(&o.data))
+    }
+
+    /// Get a mutable reference for the object at the given key. Will return `None` if missing or expired.
+    fn get_mut(&mut self, key: &Bytes) -> Option<&mut RedisDataType> {
+        self.data
+            .get_mut(key)
+            .and_then(|o| o.is_current().then_some(&mut o.data))
+    }
+
     /// Get a mutable reference for the object at the given key. If there was no entry or it was expired,
     /// use the provided default function to initialize it.
     fn get_entry_with_default<F>(&mut self, key: Bytes, default_fn: F) -> &mut RedisObject

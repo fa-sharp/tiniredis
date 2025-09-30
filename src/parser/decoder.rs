@@ -4,9 +4,9 @@ use tracing::debug;
 use super::*;
 
 /// RESP value parser that works as a tokio decoder
-pub struct RespParser;
+pub struct RespDecoder;
 
-impl Decoder for RespParser {
+impl Decoder for RespDecoder {
     type Item = RedisValue;
     type Error = RedisParseError;
 
