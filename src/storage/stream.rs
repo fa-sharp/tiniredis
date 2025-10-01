@@ -8,7 +8,7 @@ pub type StreamId = (u64, u64);
 pub type StreamEntry = (StreamId, Vec<(Bytes, Bytes)>);
 pub type StreamKeyAndEntries = (Bytes, Vec<StreamEntry>);
 
-type KeyIdPairs = Vec<(Bytes, StreamId)>;
+type KeyIdPair = (Bytes, StreamId);
 
 /// Stream interface
 pub trait StreamStorage {
@@ -24,7 +24,7 @@ pub trait StreamStorage {
     fn xread(
         &self,
         streams: Vec<(Bytes, Bytes)>,
-    ) -> Result<(KeyIdPairs, Vec<StreamKeyAndEntries>), Bytes>;
+    ) -> Result<(Vec<KeyIdPair>, Vec<StreamKeyAndEntries>), Bytes>;
 }
 
 impl StreamStorage for MemoryStorage {
@@ -98,7 +98,7 @@ impl StreamStorage for MemoryStorage {
     fn xread(
         &self,
         streams: Vec<(Bytes, Bytes)>,
-    ) -> Result<(Vec<(Bytes, StreamId)>, Vec<(Bytes, Vec<StreamEntry>)>), Bytes> {
+    ) -> Result<(Vec<KeyIdPair>, Vec<StreamKeyAndEntries>), Bytes> {
         const START_ID: StreamId = (0, 0);
         let mut parsed_streams = Vec::with_capacity(streams.len());
         let mut response = Vec::with_capacity(streams.len());

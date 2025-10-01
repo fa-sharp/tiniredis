@@ -21,10 +21,10 @@ impl Arguments {
         let mut args = VecDeque::from(values);
         let command = args
             .pop_front()
-            .and_then(|arg| arg.into_bytes())
+            .and_then(RedisValue::into_bytes)
             .and_then(|arg_b| {
                 let command_str = std::str::from_utf8(&arg_b).ok();
-                command_str.map(|c| c.to_ascii_uppercase())
+                command_str.map(str::to_ascii_uppercase)
             })
             .ok_or_else(|| anyhow::anyhow!("Invalid command"))?;
 
@@ -37,7 +37,7 @@ impl Arguments {
 
     /// Pop the next argument as bytes or return an error
     pub fn pop(&mut self, name: &str) -> anyhow::Result<Bytes> {
-        let Some(arg) = self.args.pop_front().and_then(|a| a.into_bytes()) else {
+        let Some(arg) = self.args.pop_front().and_then(RedisValue::into_bytes) else {
             bail!("{}: {name} argument missing", self.command);
         };
         Ok(arg)
@@ -49,7 +49,7 @@ impl Arguments {
         A: FromStr,
         <A as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        let Some(arg) = self.args.pop_front().and_then(|a| a.into_bytes()) else {
+        let Some(arg) = self.args.pop_front().and_then(RedisValue::into_bytes) else {
             bail!("{}: {name} argument missing", self.command);
         };
 
@@ -61,7 +61,7 @@ impl Arguments {
 
     /// Pop the next argument as bytes if it exists
     pub fn pop_optional(&mut self) -> Option<Bytes> {
-        self.args.pop_front().and_then(|a| a.into_bytes())
+        self.args.pop_front().and_then(RedisValue::into_bytes)
     }
 
     /// Pop and parse the next argument if it exists
@@ -70,7 +70,7 @@ impl Arguments {
         A: FromStr,
         <A as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        if let Some(arg) = self.args.pop_front().and_then(|a| a.into_bytes()) {
+        if let Some(arg) = self.args.pop_front().and_then(RedisValue::into_bytes) {
             return Ok(Some(
                 std::str::from_utf8(&arg)
                     .context("invalid argument")?
@@ -91,7 +91,7 @@ impl Arguments {
         }) {
             if self.args.get(arg_idx + 1).is_some() {
                 self.args.remove(arg_idx);
-                return self.args.remove(arg_idx).and_then(|a| a.into_bytes());
+                return self.args.remove(arg_idx).and_then(RedisValue::into_bytes);
             }
         }
         None
@@ -111,7 +111,7 @@ impl Arguments {
         }) {
             if self.args.get(arg_idx + 1).is_some() {
                 self.args.remove(arg_idx);
-                return match self.args.remove(arg_idx).and_then(|a| a.into_bytes()) {
+                return match self.args.remove(arg_idx).and_then(RedisValue::into_bytes) {
                     None => Ok(None),
                     Some(arg) => Ok(Some(
                         std::str::from_utf8(&arg)

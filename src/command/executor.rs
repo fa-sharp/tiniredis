@@ -17,7 +17,7 @@ use crate::{
     tasks::{BPopClient, XReadClient},
 };
 
-/// Execute the command, and format the response into [RedisValue] (RESP format)
+/// Execute the command, and format the response into [`RedisValue`] (RESP format)
 pub fn execute_command(
     command: Command,
     storage: &mut (impl Storage + ListStorage + StreamStorage),
@@ -70,16 +70,17 @@ pub fn execute_command(
             key,
             dir,
             timeout_millis,
-        } => match storage.pop(&key, dir, 1) {
-            Some(mut elems) => RedisValue::Array(vec![
-                RedisValue::String(key),
-                RedisValue::String(elems.pop().expect("should have 1 item")),
-            ])
-            .into(),
-            None => {
+        } => {
+            if let Some(mut elems) = storage.pop(&key, dir, 1) {
+                RedisValue::Array(vec![
+                    RedisValue::String(key),
+                    RedisValue::String(elems.pop().expect("should have 1 item")),
+                ])
+                .into()
+            } else {
                 let key_response = key.clone();
                 let (tx, rx) = oneshot::channel();
-                queues.bpop_push(BPopClient { key, tx, dir });
+                queues.bpop_push(BPopClient { key, dir, tx });
                 let block_response = if timeout_millis == 0 {
                     rx.map_ok(|bytes| {
                         Ok(RedisValue::Array(vec![
@@ -102,7 +103,7 @@ pub fn execute_command(
                 };
                 CommandResponse::Block(block_response)
             }
-        },
+        }
         Command::LLen { key } => RedisValue::Int(storage.llen(&key)).into(),
         Command::LRange { key, start, stop } => {
             let elems = storage.lrange(&key, start, stop);
