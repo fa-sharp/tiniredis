@@ -27,7 +27,7 @@ impl Queues {
 
     /// Enqueue a blocking xread client
     pub fn xread_push(&self, client: XReadClient) {
-        self.xread.lock().unwrap().push_back(client);
+        self.xread_lock().push_back(client);
     }
 
     /// Remove any disconnected clients from queues

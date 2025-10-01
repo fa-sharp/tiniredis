@@ -49,13 +49,16 @@ pub async fn xread_task(
                 continue;
             }
 
-            // Execute XREAD command, and if not an empty response, remove sender and send response
-            let response = storage_lock.xread(client.streams.clone());
-            if response.is_err() || response.as_ref().is_ok_and(|r| !r.is_empty()) {
-                if let Some(tx) = client.tx.take() {
-                    tx.send(response).ok();
+            // Execute XREAD command, and if not an empty response, remove sender and send response to client
+            match storage_lock.xread(client.streams.clone()) {
+                Ok((_, response)) if !response.is_empty() => {
+                    client.tx.take().and_then(|tx| tx.send(Ok(response)).ok());
                 }
-            }
+                Err(err) => {
+                    client.tx.take().and_then(|tx| tx.send(Err(err)).ok());
+                }
+                _ => {}
+            };
         }
 
         // Remove handled clients from queue

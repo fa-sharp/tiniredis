@@ -111,15 +111,15 @@ impl Arguments {
         }) {
             if self.args.get(arg_idx + 1).is_some() {
                 self.args.remove(arg_idx);
-                let arg = self.args.remove(arg_idx).and_then(|a| a.into_bytes());
-                return arg
-                    .as_deref()
-                    .map(std::str::from_utf8)
-                    .transpose()
-                    .with_context(|| format!("invalid {name}"))?
-                    .map(|a| a.parse())
-                    .transpose()
-                    .with_context(|| format!("invalid {name}"));
+                return match self.args.remove(arg_idx).and_then(|a| a.into_bytes()) {
+                    None => Ok(None),
+                    Some(arg) => Ok(Some(
+                        std::str::from_utf8(&arg)
+                            .with_context(|| format!("invalid {name}"))?
+                            .parse()
+                            .with_context(|| format!("invalid {name}"))?,
+                    )),
+                };
             }
         }
         Ok(None)

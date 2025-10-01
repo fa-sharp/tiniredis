@@ -6,9 +6,10 @@ use std::{
 use bytes::Bytes;
 use tokio::time::Instant;
 
-pub type StreamEntry = ((u64, u64), Vec<(Bytes, Bytes)>);
+pub type StreamId = (u64, u64);
+pub type StreamEntry = (StreamId, Vec<(Bytes, Bytes)>);
 
-/// Storage interface
+/// Base storage interface
 pub trait Storage {
     fn get(&self, key: &Bytes) -> Option<Bytes>;
     fn set(&mut self, key: Bytes, val: Bytes, ttl_millis: Option<u64>);
@@ -24,18 +25,17 @@ pub trait Storage {
     fn pop(&mut self, key: &Bytes, dir: ListDirection, count: i64) -> Option<Vec<Bytes>>;
     fn llen(&self, key: &Bytes) -> i64;
     fn lrange(&self, key: &Bytes, start: i64, stop: i64) -> Vec<Bytes>;
-    fn xadd(
-        &mut self,
-        key: Bytes,
-        id: Bytes,
-        data: Vec<(Bytes, Bytes)>,
-    ) -> Result<(u64, u64), Bytes>;
+    fn xadd(&mut self, key: Bytes, id: Bytes, data: Vec<(Bytes, Bytes)>)
+        -> Result<StreamId, Bytes>;
     fn xlen(&self, key: &Bytes) -> i64;
     fn xrange(&self, key: &Bytes, start: &Bytes, end: &Bytes) -> Result<Vec<StreamEntry>, Bytes>;
-    fn xread(&self, streams: Vec<(Bytes, Bytes)>) -> Result<Vec<(Bytes, Vec<StreamEntry>)>, Bytes>;
+    fn xread(
+        &self,
+        streams: Vec<(Bytes, Bytes)>,
+    ) -> Result<(Vec<(Bytes, StreamId)>, Vec<(Bytes, Vec<StreamEntry>)>), Bytes>;
     fn size(&self) -> i64;
     fn flush(&mut self);
-    fn cleanup_expired(&mut self);
+    fn cleanup_expired(&mut self) -> usize;
 }
 
 /// Direction for push/pop operations
@@ -69,7 +69,7 @@ pub struct RedisObject {
 pub enum RedisDataType {
     String(Bytes),
     List(VecDeque<Bytes>),
-    Stream(BTreeMap<(u64, u64), Vec<(Bytes, Bytes)>>),
+    Stream(BTreeMap<StreamId, Vec<(Bytes, Bytes)>>),
 }
 
 impl Storage for MemoryStorage {
@@ -204,9 +204,9 @@ impl Storage for MemoryStorage {
         key: Bytes,
         id: Bytes,
         data: Vec<(Bytes, Bytes)>,
-    ) -> Result<(u64, u64), Bytes> {
+    ) -> Result<StreamId, Bytes> {
         // Validate/generate ID
-        const MIN_ID: (u64, u64) = (0, 0);
+        const MIN_ID: StreamId = (0, 0);
         let min_id = if let Some(RedisDataType::Stream(map)) = self.get(&key) {
             map.last_key_value().map(|(id, _)| *id).unwrap_or(MIN_ID)
         } else {
@@ -266,11 +266,22 @@ impl Storage for MemoryStorage {
         }
     }
 
-    fn xread(&self, streams: Vec<(Bytes, Bytes)>) -> Result<Vec<(Bytes, Vec<StreamEntry>)>, Bytes> {
-        let mut response = Vec::new();
+    fn xread(
+        &self,
+        streams: Vec<(Bytes, Bytes)>,
+    ) -> Result<(Vec<(Bytes, StreamId)>, Vec<(Bytes, Vec<StreamEntry>)>), Bytes> {
+        const START_ID: StreamId = (0, 0);
+        let mut parsed_streams = Vec::with_capacity(streams.len());
+        let mut response = Vec::with_capacity(streams.len());
+
         for (key, id) in streams {
-            let (start_ms, start_seq) = parse_stream_id(&id, false, |_| 0)?;
             if let Some(RedisDataType::Stream(map)) = self.get(&key) {
+                let (start_ms, start_seq) = match id.as_ref() {
+                    b"$" => map.last_key_value().map(|(id, _)| *id).unwrap_or(START_ID),
+                    _ => parse_stream_id(&id, false, |_| 0)?,
+                };
+                parsed_streams.push((key.clone(), (start_ms, start_seq)));
+
                 let entries: Vec<StreamEntry> = map
                     .range((start_ms, start_seq + 1)..)
                     .map(|(id, data)| (*id, data.to_owned()))
@@ -278,10 +289,16 @@ impl Storage for MemoryStorage {
                 if !entries.is_empty() {
                     response.push((key, entries));
                 }
+            } else {
+                let parsed_id = match id.as_ref() {
+                    b"$" => START_ID,
+                    _ => parse_stream_id(&id, false, |_| 0)?,
+                };
+                parsed_streams.push((key, parsed_id));
             }
         }
 
-        Ok(response)
+        Ok((parsed_streams, response))
     }
 
     fn size(&self) -> i64 {
@@ -293,14 +310,23 @@ impl Storage for MemoryStorage {
         self.data.clear();
     }
 
-    fn cleanup_expired(&mut self) {
-        self.data.retain(|_, o| o.is_current());
+    fn cleanup_expired(&mut self) -> usize {
+        let expired_keys: Vec<_> = self
+            .data
+            .iter()
+            .filter_map(|(key, obj)| (!obj.is_current()).then(|| key.clone()))
+            .collect();
+        for key in &expired_keys {
+            self.data.remove(key);
+        }
+
+        expired_keys.len()
     }
 }
 
 const INVALID_ID: Bytes = Bytes::from_static(b"ERR invalid ID");
 
-fn parse_stream_id<S>(raw: &Bytes, generate_ms: bool, default_seq: S) -> Result<(u64, u64), Bytes>
+fn parse_stream_id<S>(raw: &Bytes, generate_ms: bool, default_seq: S) -> Result<StreamId, Bytes>
 where
     S: Fn(u64) -> u64,
 {

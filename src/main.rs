@@ -40,6 +40,7 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_max_level(tracing::level_filters::LevelFilter::DEBUG)
         .init();
+
     #[cfg(not(debug_assertions))]
     tracing_subscriber::fmt()
         .event_format(tracing_subscriber::fmt::format::json())
@@ -87,6 +88,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or(6379);
     let listener = TcpListener::bind(format!("{host}:{port}")).await?;
     info!("tinikeyval listening on {host}:{port}...");
+
     tokio::select! {
         _ = main_loop(listener, storage, queues, senders) => {}
         _ = shutdown_sig.changed() => {
@@ -167,7 +169,6 @@ async fn inner_process(
         let mut storage_lock = storage.lock().unwrap();
         command.execute(storage_lock.deref_mut(), queues, senders)
     };
-
     let response_val = match response {
         CommandResponse::Value(value) => value,
         CommandResponse::Block(rx) => rx.await.context("sender dropped")?,

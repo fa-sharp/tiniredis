@@ -19,8 +19,10 @@ pub async fn cleanup_task(
             _ = interval.tick() => (),
             _ = shutdown.changed() => break
         }
-        debug!("cleanup task running");
-        storage.lock().unwrap().cleanup_expired();
+
+        let expired_count = storage.lock().unwrap().cleanup_expired();
         queues.cleanup_disconnected();
+
+        debug!("cleanup task: {expired_count} expired");
     }
 }
