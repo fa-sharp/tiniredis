@@ -80,11 +80,10 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     // Start server
-    let host = env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_owned());
-    let port: u16 = env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(6379);
+    let host_var = env::var("HOST");
+    let port_var = env::var("PORT");
+    let host = host_var.as_deref().unwrap_or("127.0.0.1");
+    let port = port_var.as_deref().unwrap_or("6379");
     let listener = TcpListener::bind(format!("{host}:{port}")).await?;
     info!("tinikeyval listening on {host}:{port}...");
 
