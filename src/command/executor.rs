@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use futures::{FutureExt, TryFutureExt};
 use tokio::sync::oneshot;
 
@@ -167,7 +167,12 @@ pub fn execute_command(
 }
 
 fn format_stream_id((ms, seq): (u64, u64)) -> Bytes {
-    Bytes::from([ms.to_string().as_bytes(), b"-", seq.to_string().as_bytes()].concat())
+    let (ms_str, seq_str) = (ms.to_string(), seq.to_string());
+    let mut bytes = BytesMut::with_capacity(ms_str.len() + seq_str.len() + 1);
+    bytes.put_slice(ms_str.as_bytes());
+    bytes.put_u8(b'-');
+    bytes.put_slice(seq_str.as_bytes());
+    bytes.freeze()
 }
 
 fn format_stream_entry((id, data): StreamEntry) -> RedisValue {
