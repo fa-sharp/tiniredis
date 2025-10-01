@@ -17,6 +17,7 @@ use anyhow::Context;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use tokio::{
+    io::{BufReader, BufWriter},
     net::{TcpListener, TcpStream},
     sync::{mpsc, watch},
     task::JoinSet,
@@ -132,8 +133,8 @@ async fn process(
     senders: Arc<Senders>,
 ) {
     let (reader, writer) = socket.split();
-    let mut framed_reader = FramedRead::new(reader, RespDecoder);
-    let mut framed_writer = FramedWrite::new(writer, RespEncoder);
+    let mut framed_reader = FramedRead::new(BufReader::new(reader), RespDecoder);
+    let mut framed_writer = FramedWrite::new(BufWriter::new(writer), RespEncoder);
 
     // Forward reader values to inner process to handle the incoming command(s).
     // Catch any bubbled errors and try sending them to the client.
