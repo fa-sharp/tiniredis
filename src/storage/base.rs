@@ -34,6 +34,7 @@ impl Storage for MemoryStorage {
                 RedisDataType::String(_) => Bytes::from_static(b"string"),
                 RedisDataType::List(_) => Bytes::from_static(b"list"),
                 RedisDataType::Stream(_) => Bytes::from_static(b"stream"),
+                RedisDataType::Set(_) => Bytes::from_static(b"set"),
             },
             None => Bytes::from_static(b"none"),
         }

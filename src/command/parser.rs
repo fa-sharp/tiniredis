@@ -91,6 +91,29 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             let stop = args.pop_parse("stop index")?;
             Command::LRange { key, start, stop }
         }
+        "SADD" | "SREM" => {
+            let key = args.pop("key")?;
+            let mut members = vec![args.pop("member")?];
+            while let Some(member) = args.pop_optional() {
+                members.push(member);
+            }
+            match args.command() {
+                "SADD" => Command::SAdd { key, members },
+                "SREM" => Command::SRem { key, members },
+                _ => unreachable!(),
+            }
+        }
+        "SCARD" => Command::SCard {
+            key: args.pop("key")?,
+        },
+        "SMEMBERS" => Command::SMembers {
+            key: args.pop("key")?,
+        },
+        "SISMEMBER" => {
+            let key = args.pop("key")?;
+            let member = args.pop("member")?;
+            Command::SIsMember { key, member }
+        }
         "XADD" => {
             let key = args.pop("key")?;
             let id = args.pop("id")?;

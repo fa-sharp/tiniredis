@@ -11,6 +11,7 @@ use crate::{
     senders::Senders,
     storage::{
         list::ListStorage,
+        set::SetStorage,
         stream::{StreamEntry, StreamStorage},
         Storage,
     },
@@ -20,7 +21,7 @@ use crate::{
 /// Execute the command, and format the response into [`RedisValue`] (RESP format)
 pub fn execute_command(
     command: Command,
-    storage: &mut (impl Storage + ListStorage + StreamStorage),
+    storage: &mut (impl Storage + ListStorage + SetStorage + StreamStorage),
     queues: &Queues,
     senders: &Senders,
 ) -> Result<CommandResponse, Bytes> {
@@ -109,6 +110,17 @@ pub fn execute_command(
             let elems = storage.lrange(&key, start, stop);
             RedisValue::Array(elems.into_iter().map(RedisValue::String).collect()).into()
         }
+        Command::SAdd { key, members } => RedisValue::Int(storage.sadd(key, members)?).into(),
+        Command::SRem { key, members } => RedisValue::Int(storage.srem(key, members)?).into(),
+        Command::SCard { key } => RedisValue::Int(storage.scard(&key)?).into(),
+        Command::SMembers { key } => {
+            let members = storage.smembers(&key)?;
+            RedisValue::Array(members.into_iter().map(RedisValue::String).collect()).into()
+        }
+        Command::SIsMember { key, member } => match storage.sismember(&key, &member)? {
+            true => RedisValue::Int(1).into(),
+            false => RedisValue::Int(0).into(),
+        },
         Command::XAdd { key, id, data } => {
             let id = storage.xadd(key.clone(), id, data)?;
             senders.notify_xread(key); // notify blocking XREAD task

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
 use bytes::Bytes;
 use tokio::time::Instant;
@@ -6,6 +6,7 @@ use tokio::time::Instant;
 mod base;
 pub use base::*;
 pub mod list;
+pub mod set;
 pub mod stream;
 
 /// Memory storage implementation using a HashMap
@@ -31,6 +32,7 @@ pub enum RedisDataType {
     String(Bytes),
     List(VecDeque<Bytes>),
     Stream(BTreeMap<stream::StreamId, Vec<(Bytes, Bytes)>>),
+    Set(HashSet<Bytes>),
 }
 
 impl MemoryStorage {
@@ -78,6 +80,10 @@ impl RedisObject {
 
     pub fn new_list() -> Self {
         Self::new(RedisDataType::List(VecDeque::with_capacity(1)))
+    }
+
+    pub fn new_set() -> Self {
+        Self::new(RedisDataType::Set(HashSet::with_capacity(1)))
     }
 
     pub fn new_stream() -> Self {

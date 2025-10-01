@@ -11,6 +11,7 @@ use crate::{
     senders::Senders,
     storage::{
         list::{ListDirection, ListStorage},
+        set::SetStorage,
         stream::StreamStorage,
         Storage,
     },
@@ -68,6 +69,24 @@ pub enum Command {
         start: i64,
         stop: i64,
     },
+    SAdd {
+        key: Bytes,
+        members: Vec<Bytes>,
+    },
+    SRem {
+        key: Bytes,
+        members: Vec<Bytes>,
+    },
+    SCard {
+        key: Bytes,
+    },
+    SMembers {
+        key: Bytes,
+    },
+    SIsMember {
+        key: Bytes,
+        member: Bytes,
+    },
     XAdd {
         key: Bytes,
         id: Bytes,
@@ -97,11 +116,6 @@ impl From<RedisValue> for CommandResponse {
         Self::Value(value)
     }
 }
-// impl From<Result<RedisValue, Bytes>> for CommandResponse {
-//     fn from(value: Result<RedisValue, Bytes>) -> Self {
-//         Self::Value(value)
-//     }
-// }
 
 impl Command {
     /// Parse the command from the raw input value
@@ -114,7 +128,7 @@ impl Command {
     /// Execute the command and get the response
     pub fn execute(
         self,
-        storage: &mut (impl Storage + ListStorage + StreamStorage),
+        storage: &mut (impl Storage + ListStorage + SetStorage + StreamStorage),
         queues: &Queues,
         senders: &Senders,
     ) -> Result<CommandResponse, Bytes> {
