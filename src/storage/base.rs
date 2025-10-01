@@ -69,7 +69,8 @@ impl Storage for MemoryStorage {
         let expired_keys: Vec<_> = self
             .data
             .iter()
-            .filter_map(|(key, obj)| (!obj.is_current()).then(|| key.clone()))
+            .filter(|(_, obj)| !obj.is_current())
+            .map(|(key, _)| key.clone())
             .collect();
         for key in &expired_keys {
             self.data.remove(key);

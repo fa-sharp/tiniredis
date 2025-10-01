@@ -6,6 +6,9 @@ use super::{MemoryStorage, RedisDataType, RedisObject};
 
 pub type StreamId = (u64, u64);
 pub type StreamEntry = (StreamId, Vec<(Bytes, Bytes)>);
+pub type StreamKeyAndEntries = (Bytes, Vec<StreamEntry>);
+
+type KeyIdPairs = Vec<(Bytes, StreamId)>;
 
 /// Stream interface
 pub trait StreamStorage {
@@ -21,7 +24,7 @@ pub trait StreamStorage {
     fn xread(
         &self,
         streams: Vec<(Bytes, Bytes)>,
-    ) -> Result<(Vec<(Bytes, StreamId)>, Vec<(Bytes, Vec<StreamEntry>)>), Bytes>;
+    ) -> Result<(KeyIdPairs, Vec<StreamKeyAndEntries>), Bytes>;
 }
 
 impl StreamStorage for MemoryStorage {
@@ -64,7 +67,7 @@ impl StreamStorage for MemoryStorage {
     }
 
     fn xlen(&self, key: &Bytes) -> i64 {
-        if let Some(RedisDataType::Stream(map)) = self.get(&key) {
+        if let Some(RedisDataType::Stream(map)) = self.get(key) {
             map.len().try_into().unwrap_or_default()
         } else {
             0
@@ -82,7 +85,7 @@ impl StreamStorage for MemoryStorage {
         };
         if start > end {
             Ok(Vec::new())
-        } else if let Some(RedisDataType::Stream(map)) = self.get(&key) {
+        } else if let Some(RedisDataType::Stream(map)) = self.get(key) {
             Ok(map
                 .range(start..=end)
                 .map(|(id, data)| (*id, data.to_owned()))

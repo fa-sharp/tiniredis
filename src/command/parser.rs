@@ -134,12 +134,12 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
         cmd => bail!("Unrecognized command '{cmd}'"),
     };
 
-    if args.remaining().len() != 0 {
+    if !args.remaining().is_empty() {
         let mut message = String::from("Unrecognized arguments: ");
         for arg in args.remaining() {
             if let Some(str) = arg.as_bytes().and_then(|a| std::str::from_utf8(a).ok()) {
                 message.push_str(str);
-                message.push_str(" ");
+                message.push(' ');
             }
         }
         bail!("{message}");

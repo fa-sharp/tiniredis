@@ -5,14 +5,14 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::{
     queues::Queues,
-    storage::stream::{StreamEntry, StreamStorage},
+    storage::stream::{StreamKeyAndEntries, StreamStorage},
 };
 
 /// A blocking xread client waiting for an added stream value
 #[derive(Debug)]
 pub struct XReadClient {
     pub streams: Vec<(Bytes, Bytes)>,
-    pub tx: Option<oneshot::Sender<Result<Vec<(Bytes, Vec<StreamEntry>)>, Bytes>>>,
+    pub tx: Option<oneshot::Sender<Result<Vec<StreamKeyAndEntries>, Bytes>>>,
 }
 
 /// Task that manages the queue of blocking xread clients. Listens for XADD
