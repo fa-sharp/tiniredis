@@ -9,7 +9,11 @@ use crate::{
     parser::RedisValue,
     queues::Queues,
     senders::Senders,
-    storage::{ListDirection, Storage},
+    storage::{
+        list::{ListDirection, ListStorage},
+        stream::StreamStorage,
+        Storage,
+    },
 };
 
 mod executor;
@@ -105,7 +109,7 @@ impl Command {
     /// Execute the command and get the response
     pub fn execute(
         self,
-        storage: &mut impl Storage,
+        storage: &mut (impl Storage + ListStorage + StreamStorage),
         queues: &Queues,
         senders: &Senders,
     ) -> CommandResponse {

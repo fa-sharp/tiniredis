@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::{
     queues::Queues,
-    storage::{Storage, StreamEntry},
+    storage::stream::{StreamEntry, StreamStorage},
 };
 
 /// A blocking xread client waiting for an added stream value
@@ -18,7 +18,7 @@ pub struct XReadClient {
 /// Task that manages the queue of blocking xread clients. Listens for XADD
 /// events via a channel.
 pub async fn xread_task(
-    storage: Arc<Mutex<impl Storage>>,
+    storage: Arc<Mutex<impl StreamStorage>>,
     queues: Arc<Queues>,
     mut xadd_rx: mpsc::UnboundedReceiver<Bytes>,
     mut shutdown: watch::Receiver<bool>,

@@ -17,7 +17,6 @@ use anyhow::Context;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use tokio::{
-    io::AsyncWrite,
     net::{TcpListener, TcpStream},
     sync::{mpsc, watch},
     task::JoinSet,
@@ -105,7 +104,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn main_loop(
     listener: TcpListener,
-    storage: Arc<Mutex<impl storage::Storage + Send + 'static>>,
+    storage: Arc<Mutex<MemoryStorage>>,
     queues: Arc<Queues>,
     senders: Arc<Senders>,
 ) {
@@ -129,7 +128,7 @@ async fn main_loop(
 /// inner process to handle the request.
 async fn process(
     mut socket: TcpStream,
-    storage: Arc<Mutex<impl storage::Storage>>,
+    storage: Arc<Mutex<MemoryStorage>>,
     queues: Arc<Queues>,
     senders: Arc<Senders>,
 ) {
@@ -138,13 +137,21 @@ async fn process(
     let mut framed_writer = FramedWrite::new(writer, RespEncoder);
 
     // Forward reader values to inner process to handle the incoming command(s).
-    // Catch any bubbled errors and try sending them to client.
+    // Catch any bubbled errors and try sending them to the client.
     while let Some(val) = framed_reader.next().await {
-        if let Err(e) = inner_process(val, &mut framed_writer, &storage, &queues, &senders).await {
-            let message = e.to_string();
-            info!("Error processing command: {message}");
-            let error_value = RedisValue::Error(Bytes::from(message.into_bytes()));
-            framed_writer.send(error_value).await.ok();
+        match inner_process(val, &storage, &queues, &senders).await {
+            Ok(response) => {
+                if let Err(err) = framed_writer.send(response).await {
+                    warn!("Failed to send response: {err}");
+                    break;
+                }
+            }
+            Err(err) => {
+                let message = err.to_string();
+                info!("Error processing command: {message}");
+                let error_value = RedisValue::Error(Bytes::from(message.into_bytes()));
+                framed_writer.send(error_value).await.ok();
+            }
         };
     }
 
@@ -154,11 +161,10 @@ async fn process(
 /// Parse, execute, and respond to the incoming command
 async fn inner_process(
     value: Result<RedisValue, RedisParseError>,
-    writer: &mut FramedWrite<impl AsyncWrite + Unpin, RespEncoder>,
-    storage: &Mutex<impl storage::Storage>,
+    storage: &Mutex<MemoryStorage>,
     queues: &Queues,
     senders: &Senders,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<RedisValue> {
     let value = value.context("parse request")?;
     debug!("Received value: {:?}", value);
 
@@ -174,8 +180,7 @@ async fn inner_process(
         CommandResponse::Block(rx) => rx.await.context("sender dropped")?,
     };
     debug!("Response: {:?}", response_val);
-    writer.send(response_val).await.context("write response")?;
-    Ok(())
+    Ok(response_val)
 }
 
 /// For graceful shutdown, setup a signal listener with tokio watch channel

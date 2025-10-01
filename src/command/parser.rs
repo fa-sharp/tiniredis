@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use anyhow::bail;
 
 use super::Command;
-use crate::{arguments::Arguments, storage::ListDirection};
+use crate::{arguments::Arguments, storage::list::ListDirection};
 
 pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
     let command = match args.command() {

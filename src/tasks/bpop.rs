@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::{
     queues::Queues,
-    storage::{ListDirection, Storage},
+    storage::list::{ListDirection, ListStorage},
 };
 
 /// A blocking pop client waiting for a value
@@ -20,7 +20,7 @@ pub struct BPopClient {
 /// key events via a channel, and then pops and sends list elements to any
 /// waiting clients.
 pub async fn bpop_task(
-    storage: Arc<Mutex<impl Storage>>,
+    storage: Arc<Mutex<impl ListStorage>>,
     queues: Arc<Queues>,
     mut bpop_rx: mpsc::UnboundedReceiver<Bytes>,
     mut shutdown: watch::Receiver<bool>,

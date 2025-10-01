@@ -9,13 +9,17 @@ use crate::{
     parser::RedisValue,
     queues::Queues,
     senders::Senders,
-    storage::{Storage, StreamEntry},
+    storage::{
+        list::ListStorage,
+        stream::{StreamEntry, StreamStorage},
+        Storage,
+    },
     tasks::{BPopClient, XReadClient},
 };
 
 pub fn execute_command(
     command: Command,
-    storage: &mut impl Storage,
+    storage: &mut (impl Storage + ListStorage + StreamStorage),
     queues: &Queues,
     senders: &Senders,
 ) -> CommandResponse {
