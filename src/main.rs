@@ -170,13 +170,18 @@ async fn inner_process(
     let command = Command::from_value(value)?;
     debug!("Parsed command: {:?}", command);
 
-    let response = {
+    let command_response = {
         let mut storage_lock = storage.lock().unwrap();
         command.execute(storage_lock.deref_mut(), queues, senders)
     };
-    let response_val = match response {
-        CommandResponse::Value(value) => value,
-        CommandResponse::Block(rx) => rx.await.context("sender dropped")?,
+    let response_result = match command_response {
+        Ok(CommandResponse::Value(value)) => Ok(value),
+        Ok(CommandResponse::Block(rx)) => rx.await.context("sender dropped")?,
+        Err(err) => Err(err),
+    };
+    let response_val = match response_result {
+        Ok(val) => val,
+        Err(err) => RedisValue::Error(err),
     };
     debug!("Response: {:?}", response_val);
     Ok(response_val)

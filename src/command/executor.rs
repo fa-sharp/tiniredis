@@ -17,13 +17,14 @@ use crate::{
     tasks::{BPopClient, XReadClient},
 };
 
+/// Execute the command, and format the response into [RedisValue] (RESP format)
 pub fn execute_command(
     command: Command,
     storage: &mut (impl Storage + ListStorage + StreamStorage),
     queues: &Queues,
     senders: &Senders,
-) -> CommandResponse {
-    match command {
+) -> Result<CommandResponse, Bytes> {
+    let command_response: CommandResponse = match command {
         Command::Ping => RedisValue::SimpleString(Bytes::from_static(b"PONG")).into(),
         Command::Echo { message } => RedisValue::String(message).into(),
         Command::DbSize => RedisValue::Int(storage.size()).into(),
@@ -50,13 +51,11 @@ pub fn execute_command(
             }
             RedisValue::Int(count).into()
         }
-        Command::Push { key, elems, dir } => match storage.push(key.clone(), elems, dir) {
-            Ok(len) => {
-                senders.notify_bpop(key); // notify blocking pop task
-                RedisValue::Int(len).into()
-            }
-            Err(bytes) => RedisValue::Error(bytes).into(),
-        },
+        Command::Push { key, elems, dir } => {
+            let len = storage.push(key.clone(), elems, dir)?;
+            senders.notify_bpop(key); // notify blocking POP task
+            RedisValue::Int(len).into()
+        }
         Command::Pop { key, dir, count } => match storage.pop(&key, dir, count) {
             Some(mut elems) => {
                 if count == 1 {
@@ -83,21 +82,21 @@ pub fn execute_command(
                 queues.bpop_push(BPopClient { key, tx, dir });
                 let block_response = if timeout_millis == 0 {
                     rx.map_ok(|bytes| {
-                        RedisValue::Array(vec![
+                        Ok(RedisValue::Array(vec![
                             RedisValue::String(key_response),
                             RedisValue::String(bytes),
-                        ])
+                        ]))
                     })
                     .boxed()
                 } else {
                     tokio::time::timeout(Duration::from_millis(timeout_millis), rx)
                         .map(|res| match res {
-                            Ok(Ok(bytes)) => Ok(RedisValue::Array(vec![
-                                RedisValue::String(key_response),
+                            Ok(Ok(bytes)) => Ok(Ok(RedisValue::Array(vec![
+                                RedisValue::String(key_response), // POP response
                                 RedisValue::String(bytes),
-                            ])),
-                            Ok(Err(e)) => Err(e),
-                            Err(_) => Ok(RedisValue::NilArray),
+                            ]))),
+                            Ok(Err(e)) => Err(e), // Receiver disconnected
+                            Err(_) => Ok(Ok(RedisValue::NilArray)), // Timeout
                         })
                         .boxed()
                 };
@@ -109,61 +108,57 @@ pub fn execute_command(
             let elems = storage.lrange(&key, start, stop);
             RedisValue::Array(elems.into_iter().map(RedisValue::String).collect()).into()
         }
-        Command::XAdd { key, id, data } => match storage.xadd(key.clone(), id, data) {
-            Ok(id) => {
-                senders.notify_xread(key); // notify blocking xread task
-                RedisValue::String(format_stream_id(id)).into()
-            }
-            Err(err) => RedisValue::Error(err).into(),
-        },
+        Command::XAdd { key, id, data } => {
+            let id = storage.xadd(key.clone(), id, data)?;
+            senders.notify_xread(key); // notify blocking XREAD task
+            RedisValue::String(format_stream_id(id)).into()
+        }
         Command::XLen { key } => RedisValue::Int(storage.xlen(&key)).into(),
-        Command::XRange { key, start, end } => match storage.xrange(&key, &start, &end) {
-            Ok(entries) => {
-                RedisValue::Array(entries.into_iter().map(format_stream_entry).collect()).into()
-            }
-            Err(err) => RedisValue::Error(err).into(),
-        },
-        Command::XRead { streams, block } => match storage.xread(streams.clone()) {
-            Ok((parsed_streams, response)) => {
-                if !response.is_empty() {
-                    RedisValue::Array(response.into_iter().map(format_stream).collect()).into()
-                } else if let Some(block_millis) = block {
-                    let (tx, rx) = oneshot::channel();
-                    queues.xread_push(XReadClient {
-                        streams: parsed_streams
-                            .into_iter()
-                            .map(|(key, id)| (key, format_stream_id(id)))
-                            .collect(),
-                        tx: Some(tx),
-                    });
-                    let block_response = if block_millis == 0 {
-                        rx.map_ok(|res| match res {
-                            Ok(streams) => RedisValue::Array(
-                                streams.into_iter().map(format_stream).collect(), // XREAD response
-                            ),
-                            Err(err) => RedisValue::Error(err), // XREAD error
+        Command::XRange { key, start, end } => {
+            let entries = storage.xrange(&key, &start, &end)?;
+            RedisValue::Array(entries.into_iter().map(format_stream_entry).collect()).into()
+        }
+        Command::XRead { streams, block } => {
+            let (parsed_streams, response) = storage.xread(streams.clone())?;
+            if !response.is_empty() {
+                RedisValue::Array(response.into_iter().map(format_stream).collect()).into()
+            } else if let Some(block_millis) = block {
+                let (tx, rx) = oneshot::channel();
+                queues.xread_push(XReadClient {
+                    streams: parsed_streams
+                        .into_iter()
+                        .map(|(key, id)| (key, format_stream_id(id)))
+                        .collect(),
+                    tx: Some(tx),
+                });
+                let block_response = if block_millis == 0 {
+                    rx.map_ok(|res| {
+                        res.map(|streams| {
+                            let resp_format = streams.into_iter().map(format_stream).collect();
+                            RedisValue::Array(resp_format)
+                        })
+                    })
+                    .boxed()
+                } else {
+                    tokio::time::timeout(Duration::from_millis(block_millis), rx)
+                        .map(|res| match res {
+                            Ok(Ok(res)) => Ok(res.map(|streams| {
+                                let resp_format = streams.into_iter().map(format_stream).collect();
+                                RedisValue::Array(resp_format) // XREAD response
+                            })),
+                            Ok(Err(recv_err)) => Err(recv_err), // Receiver disconnected
+                            Err(_) => Ok(Ok(RedisValue::NilArray)), // Timeout
                         })
                         .boxed()
-                    } else {
-                        tokio::time::timeout(Duration::from_millis(block_millis), rx)
-                            .map(|res| match res {
-                                Ok(Ok(Ok(streams))) => Ok(RedisValue::Array(
-                                    streams.into_iter().map(format_stream).collect(), // XREAD response
-                                )),
-                                Ok(Ok(Err(err))) => Ok(RedisValue::Error(err)), // XREAD error
-                                Ok(Err(recv_err)) => Err(recv_err), // Receiver disconnected
-                                Err(_) => Ok(RedisValue::NilArray), // Timeout
-                            })
-                            .boxed()
-                    };
-                    CommandResponse::Block(block_response)
-                } else {
-                    RedisValue::NilArray.into()
-                }
+                };
+                CommandResponse::Block(block_response)
+            } else {
+                RedisValue::NilArray.into()
             }
-            Err(err) => RedisValue::Error(err).into(),
-        },
-    }
+        }
+    };
+
+    Ok(command_response)
 }
 
 fn format_stream_id((ms, seq): (u64, u64)) -> Bytes {

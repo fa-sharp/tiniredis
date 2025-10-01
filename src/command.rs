@@ -90,13 +90,18 @@ pub enum Command {
 /// The possible responses from a command
 pub enum CommandResponse {
     Value(RedisValue),
-    Block(BoxFuture<'static, Result<RedisValue, oneshot::error::RecvError>>),
+    Block(BoxFuture<'static, Result<Result<RedisValue, Bytes>, oneshot::error::RecvError>>),
 }
 impl From<RedisValue> for CommandResponse {
     fn from(value: RedisValue) -> Self {
         Self::Value(value)
     }
 }
+// impl From<Result<RedisValue, Bytes>> for CommandResponse {
+//     fn from(value: Result<RedisValue, Bytes>) -> Self {
+//         Self::Value(value)
+//     }
+// }
 
 impl Command {
     /// Parse the command from the raw input value
@@ -112,7 +117,7 @@ impl Command {
         storage: &mut (impl Storage + ListStorage + StreamStorage),
         queues: &Queues,
         senders: &Senders,
-    ) -> CommandResponse {
+    ) -> Result<CommandResponse, Bytes> {
         executor::execute_command(self, storage, queues, senders)
     }
 }

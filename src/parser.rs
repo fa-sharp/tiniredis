@@ -1,4 +1,4 @@
-//! RESP protocol parser
+//! RESP protocol implementation
 //!
 //! For details on the design and inspiration of this module,
 //! see [this article](https://dpbriggs.ca/blog/Implementing-A-Copyless-Redis-Protocol-in-Rust-With-Parsing-Combinators)
@@ -16,7 +16,7 @@ pub use errors::RedisParseError;
 
 use bytes::{Bytes, BytesMut};
 
-/// Represents a parsed Redis value, or a value that can be sent as a response
+/// Represents a parsed RESP value, and/or a RESP value that can be sent as a response
 #[derive(Debug)]
 pub enum RedisValue {
     String(Bytes),
