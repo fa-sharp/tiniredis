@@ -60,7 +60,7 @@ pub async fn pubsub_task(
             PubSubEvent::Ping(id) => {
                 let Some(client) = pubsub_queue.get_mut(&id) else {
                     warn!("pubsub client {id} not found");
-                    break;
+                    continue;
                 };
                 let pong = RedisValue::Array(vec![
                     RedisValue::String(Bytes::from_static(b"pong")),
@@ -71,7 +71,7 @@ pub async fn pubsub_task(
             PubSubEvent::Subscribe(id, channels) => {
                 let Some(client) = pubsub_queue.get_mut(&id) else {
                     warn!("pubsub client {id} not found");
-                    break;
+                    continue;
                 };
 
                 let mut messages = Vec::new();
@@ -94,7 +94,7 @@ pub async fn pubsub_task(
             PubSubEvent::Unsubscribe(id, channels) => {
                 let Some(client) = pubsub_queue.get_mut(&id) else {
                     warn!("pubsub client {id} not found");
-                    break;
+                    continue;
                 };
 
                 let mut messages = Vec::new();

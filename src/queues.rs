@@ -12,7 +12,7 @@ use crate::{
 #[derive(Debug, Default)]
 pub struct Queues {
     bpop: Mutex<VecDeque<BPopClient>>,
-    xread: Mutex<VecDeque<XReadClient>>,
+    xread: Mutex<Vec<XReadClient>>,
     pubsub: Mutex<FxHashMap<u64, PubSubClient>>,
 }
 
@@ -27,14 +27,14 @@ impl Queues {
         self.bpop_lock().push_back(client);
     }
 
-    /// Get an exclusive lock on the blocking xread queue
-    pub fn xread_lock(&self) -> std::sync::MutexGuard<'_, VecDeque<XReadClient>> {
+    /// Get an exclusive lock on the blocking xread clients
+    pub fn xread_lock(&self) -> std::sync::MutexGuard<'_, Vec<XReadClient>> {
         self.xread.lock().unwrap()
     }
 
-    /// Enqueue a blocking xread client
+    /// Add a blocking xread client
     pub fn xread_push(&self, client: XReadClient) {
-        self.xread_lock().push_back(client);
+        self.xread_lock().push(client);
     }
 
     /// Get an exclusive lock on the pubsub clients
@@ -60,6 +60,6 @@ impl Queues {
         self.xread_lock()
             .retain(|client| !client.tx.as_ref().is_none_or(|tx| tx.is_closed()));
         self.pubsub_lock()
-            .retain(|_, client| !client.channels.is_empty() && !client.tx.is_closed());
+            .retain(|_, client| !client.tx.is_closed());
     }
 }
