@@ -37,8 +37,8 @@ pub async fn subscribe_mode(
                     Ok(raw_command) => match process_pubsub_command(raw_command, client_id, notifiers) {
                         Ok(_) => continue,
                         Err(err) => {
-                            info!("error executing command");
-                            RedisValue::String(Bytes::from(err.to_string()))
+                            info!("error executing command: {err}");
+                            RedisValue::Error(Bytes::from(err.to_string()))
                         },
                     },
                     Err(err) => {
