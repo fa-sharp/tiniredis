@@ -5,9 +5,14 @@ use tokio::time::Instant;
 
 mod base;
 pub use base::*;
+
 pub mod list;
 pub mod set;
+pub mod sorted_set;
 pub mod stream;
+
+/// Common result type for some storage operations
+pub type StorageResult<T> = Result<T, Bytes>;
 
 /// Memory storage implementation using a HashMap
 #[derive(Debug, Default)]
@@ -33,6 +38,7 @@ pub enum RedisDataType {
     List(VecDeque<Bytes>),
     Stream(BTreeMap<stream::StreamId, Vec<(Bytes, Bytes)>>),
     Set(HashSet<Bytes>),
+    SortedSet(sorted_set::SortedSet),
 }
 
 impl MemoryStorage {

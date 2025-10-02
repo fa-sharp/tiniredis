@@ -12,6 +12,7 @@ use crate::{
     storage::{
         list::{ListDirection, ListStorage},
         set::SetStorage,
+        sorted_set::SortedSetStorage,
         stream::StreamStorage,
         Storage,
     },
@@ -87,6 +88,14 @@ pub enum Command {
         key: Bytes,
         member: Bytes,
     },
+    ZAdd {
+        key: Bytes,
+        members: Vec<(f64, Bytes)>,
+    },
+    ZRank {
+        key: Bytes,
+        member: Bytes,
+    },
     XAdd {
         key: Bytes,
         id: Bytes,
@@ -139,7 +148,7 @@ impl Command {
     /// Execute the command and get the response
     pub fn execute(
         self,
-        storage: &mut (impl Storage + ListStorage + SetStorage + StreamStorage),
+        storage: &mut (impl Storage + ListStorage + SetStorage + SortedSetStorage + StreamStorage),
         queues: &Queues,
         notifiers: &Notifiers,
     ) -> Result<CommandResponse, Bytes> {

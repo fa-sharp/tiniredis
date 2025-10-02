@@ -114,6 +114,21 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             let member = args.pop("member")?;
             Command::SIsMember { key, member }
         }
+        "ZADD" => {
+            let key = args.pop("key")?;
+            let mut members = vec![(args.pop_parse("score")?, args.pop("member")?)];
+            while let (Some(score), Some(member)) =
+                (args.pop_parse_optional()?, args.pop_optional())
+            {
+                members.push((score, member));
+            }
+            Command::ZAdd { key, members }
+        }
+        "ZRANK" => {
+            let key = args.pop("key")?;
+            let member = args.pop("member")?;
+            Command::ZRank { key, member }
+        }
         "XADD" => {
             let key = args.pop("key")?;
             let id = args.pop("id")?;

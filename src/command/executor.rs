@@ -13,6 +13,7 @@ use crate::{
     storage::{
         list::ListStorage,
         set::SetStorage,
+        sorted_set::SortedSetStorage,
         stream::{StreamEntry, StreamStorage},
         Storage,
     },
@@ -22,7 +23,7 @@ use crate::{
 /// Execute the command, and format the response into [`RedisValue`] (RESP format)
 pub fn execute_command(
     command: Command,
-    storage: &mut (impl Storage + ListStorage + SetStorage + StreamStorage),
+    storage: &mut (impl Storage + ListStorage + SetStorage + SortedSetStorage + StreamStorage),
     queues: &Queues,
     notifiers: &Notifiers,
 ) -> Result<CommandResponse, Bytes> {
@@ -121,6 +122,11 @@ pub fn execute_command(
         Command::SIsMember { key, member } => match storage.sismember(&key, &member)? {
             true => RedisValue::Int(1).into(),
             false => RedisValue::Int(0).into(),
+        },
+        Command::ZAdd { key, members } => RedisValue::Int(storage.zadd(key, members)?).into(),
+        Command::ZRank { key, member } => match storage.zrank(&key, member)? {
+            Some(rank) => RedisValue::Int(rank).into(),
+            None => RedisValue::NilString.into(),
         },
         Command::XAdd { key, id, data } => {
             let id = storage.xadd(key.clone(), id, data)?;
