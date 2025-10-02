@@ -17,7 +17,7 @@ use anyhow::Context;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use tokio::{
-    io::{BufReader, BufWriter},
+    io::{AsyncBufRead, AsyncWrite, BufReader, BufWriter},
     net::{TcpListener, TcpStream},
     sync::{mpsc, watch},
     task::JoinSet,
@@ -50,6 +50,7 @@ async fn main() -> anyhow::Result<()> {
     // Setup channels
     let (bpop_tx, bpop_rx) = mpsc::unbounded_channel();
     let (xread_tx, xread_rx) = mpsc::unbounded_channel();
+    let (pubsub_tx, pubsub_rx) = mpsc::unbounded_channel();
 
     // Setup storage, queues, and notifiers
     let storage: Arc<Mutex<MemoryStorage>> = Arc::default();
@@ -57,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
     let senders: Arc<Senders> = Arc::new(Senders {
         bpop: bpop_tx,
         xread: xread_tx,
+        pubsub: pubsub_tx,
     });
 
     // Spawn tasks
@@ -72,6 +74,11 @@ async fn main() -> anyhow::Result<()> {
         Arc::clone(&storage),
         Arc::clone(&queues),
         xread_rx,
+        shutdown_sig.clone(),
+    ));
+    all_tasks.spawn(tasks::pubsub_task(
+        Arc::clone(&queues),
+        pubsub_rx,
         shutdown_sig.clone(),
     ));
     all_tasks.spawn(tasks::cleanup_task(
@@ -124,8 +131,8 @@ async fn main_loop(
     }
 }
 
-/// Create framed reader and writer to decode and encode RESP frames, and forward to
-/// inner process to handle the request.
+/// Create framed reader and writer to decode and encode RESP frames, and then
+/// process and respond to incoming commands.
 async fn process(
     mut socket: TcpStream,
     storage: Arc<Mutex<MemoryStorage>>,
@@ -136,11 +143,27 @@ async fn process(
     let mut framed_reader = FramedRead::new(BufReader::new(reader), RespDecoder);
     let mut framed_writer = FramedWrite::new(BufWriter::new(writer), RespEncoder);
 
-    // Forward reader values to inner process to handle the incoming command(s).
-    // Catch any bubbled errors and try sending them to the client.
-    while let Some(val) = framed_reader.next().await {
-        match inner_process(val, &storage, &queues, &senders).await {
-            Ok(response) => {
+    while let Some(value) = framed_reader.next().await {
+        match process_command(value, &storage, &queues, &senders).await {
+            Ok(command_result) => {
+                let response_result = match command_result {
+                    Ok(CommandResponse::Value(value)) => Ok(value),
+                    Ok(CommandResponse::Block(rx)) => match rx.await {
+                        Ok(res) => res,
+                        Err(_) => break, // blocking sender dropped (unexpected)
+                    },
+                    Ok(CommandResponse::Subscribed(rx)) => {
+                        debug!("Entering subscribe mode");
+                        subscribe_mode(rx, &mut framed_reader, &mut framed_writer).await;
+                        continue;
+                    }
+                    Err(err) => Err(err),
+                };
+                let response = match response_result {
+                    Ok(val) => val,
+                    Err(err) => RedisValue::Error(err),
+                };
+                debug!("Response: {:?}", response);
                 if let Err(err) = framed_writer.send(response).await {
                     warn!("Failed to send response: {err}");
                     break;
@@ -159,13 +182,13 @@ async fn process(
 }
 
 /// Parse, execute, and respond to the incoming command
-async fn inner_process(
+async fn process_command(
     value: Result<RedisValue, RedisParseError>,
     storage: &Mutex<MemoryStorage>,
     queues: &Queues,
     senders: &Senders,
-) -> anyhow::Result<RedisValue> {
-    let value = value.context("parse request")?;
+) -> anyhow::Result<Result<CommandResponse, Bytes>> {
+    let value = value?;
     debug!("Received value: {:?}", value);
 
     let command = Command::from_value(value)?;
@@ -175,17 +198,34 @@ async fn inner_process(
         let mut storage_lock = storage.lock().unwrap();
         command.execute(storage_lock.deref_mut(), queues, senders)
     };
-    let response_result = match command_response {
-        Ok(CommandResponse::Value(value)) => Ok(value),
-        Ok(CommandResponse::Block(rx)) => rx.await.context("sender dropped")?,
-        Err(err) => Err(err),
-    };
-    let response_val = match response_result {
-        Ok(val) => val,
-        Err(err) => RedisValue::Error(err),
-    };
-    debug!("Response: {:?}", response_val);
-    Ok(response_val)
+    Ok(command_response)
+}
+
+#[tracing::instrument(skip(rx, reader, writer))]
+async fn subscribe_mode(
+    mut rx: mpsc::UnboundedReceiver<RedisValue>,
+    reader: &mut FramedRead<impl AsyncBufRead + Unpin + std::fmt::Debug, RespDecoder>,
+    writer: &mut FramedWrite<impl AsyncWrite + Unpin + std::fmt::Debug, RespEncoder>,
+) {
+    loop {
+        tokio::select! {
+            Some(message) = rx.recv() => {
+                debug!("message received: {message:?}");
+                let write_res = writer.send(message).await;
+                if let Err(e) = write_res {
+                    debug!("exiting subscribe mode due to write error: {e}");
+                    break;
+                }
+            }
+            Some(reader_res) = reader.next() => {
+                debug!("got input: {reader_res:?}");
+            }
+            else => {
+                debug!("exiting subscribe mode due to else clause reached");
+                break
+            }
+        }
+    }
 }
 
 /// For graceful shutdown, setup a signal listener with tokio watch channel

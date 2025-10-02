@@ -1,8 +1,9 @@
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{FutureExt, TryFutureExt};
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
+use tracing::warn;
 
 use super::{Command, CommandResponse};
 use crate::{
@@ -15,7 +16,7 @@ use crate::{
         stream::{StreamEntry, StreamStorage},
         Storage,
     },
-    tasks::{BPopClient, XReadClient},
+    tasks::{BPopClient, PubSubClient, XReadClient},
 };
 
 /// Execute the command, and format the response into [`RedisValue`] (RESP format)
@@ -169,6 +170,30 @@ pub fn execute_command(
                 RedisValue::NilArray.into()
             }
         }
+        Command::Subscribe { channels } => {
+            let (tx, rx) = mpsc::unbounded_channel();
+            let channels = HashSet::from_iter(channels);
+            let init_messages = channels.iter().enumerate().map(|(idx, channel)| {
+                RedisValue::Array(vec![
+                    RedisValue::String(Bytes::from_static(b"subscribe")),
+                    RedisValue::String(channel.clone()),
+                    RedisValue::Int((idx + 1).try_into().unwrap_or_default()),
+                ])
+            });
+            for message in init_messages {
+                tx.send(message).expect("channel should be open");
+            }
+
+            queues.pubsub_add(PubSubClient { tx, channels });
+            CommandResponse::Subscribed(rx)
+        }
+        Command::Publish { channel, message } => match senders.publish_pubsub(channel, message) {
+            Ok(rx) => CommandResponse::Block(rx.map_ok(|count| Ok(RedisValue::Int(count))).boxed()),
+            Err(err) => {
+                warn!("Failed to publish message due to dropped receiver: {err}");
+                Err(Bytes::from_static(b"Failed to send message"))?
+            }
+        },
     };
 
     Ok(command_response)

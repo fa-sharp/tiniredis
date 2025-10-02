@@ -154,6 +154,18 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
 
             Command::XRead { streams, block }
         }
+        "SUBSCRIBE" => {
+            let mut channels = vec![args.pop("channel")?];
+            while let Some(channel) = args.pop_optional() {
+                channels.push(channel);
+            }
+            Command::Subscribe { channels }
+        }
+        "PUBLISH" => {
+            let channel = args.pop("channel")?;
+            let message = args.pop("message")?;
+            Command::Publish { channel, message }
+        }
         cmd => bail!("Unrecognized command '{cmd}'"),
     };
 

@@ -7,6 +7,7 @@ use tracing::trace;
 use super::*;
 
 /// RESP value encoder that works as a tokio encoder
+#[derive(Debug)]
 pub struct RespEncoder;
 
 impl Encoder<RedisValue> for RespEncoder {

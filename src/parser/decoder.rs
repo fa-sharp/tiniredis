@@ -6,6 +6,7 @@ use tracing::trace;
 use super::*;
 
 /// RESP value parser that works as a tokio decoder
+#[derive(Debug)]
 pub struct RespDecoder;
 
 impl Decoder for RespDecoder {

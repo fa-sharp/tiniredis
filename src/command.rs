@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     arguments::Arguments,
@@ -104,12 +104,23 @@ pub enum Command {
         streams: Vec<(Bytes, Bytes)>,
         block: Option<u64>,
     },
+    Subscribe {
+        channels: Vec<Bytes>,
+    },
+    Publish {
+        channel: Bytes,
+        message: Bytes,
+    },
 }
 
 /// The possible responses from a command
 pub enum CommandResponse {
+    /// An immediate response value
     Value(RedisValue),
+    /// A blocking response
     Block(BoxFuture<'static, Result<Result<RedisValue, Bytes>, oneshot::error::RecvError>>),
+    /// Subscribed to pubsub
+    Subscribed(mpsc::UnboundedReceiver<RedisValue>),
 }
 impl From<RedisValue> for CommandResponse {
     fn from(value: RedisValue) -> Self {
