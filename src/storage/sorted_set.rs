@@ -22,7 +22,7 @@ pub struct RankedItem {
 }
 
 /// Margin for f64 equality
-const F64_MARGIN: f64 = 1e-10;
+// const F64_MARGIN: f64 = 1e-10;
 
 // Ordering by score then member
 impl Ord for RankedItem {
