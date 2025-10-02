@@ -7,9 +7,9 @@ use tracing::warn;
 
 use super::{Command, CommandResponse};
 use crate::{
+    notifiers::Notifiers,
     parser::RedisValue,
     queues::Queues,
-    senders::Senders,
     storage::{
         list::ListStorage,
         set::SetStorage,
@@ -24,7 +24,7 @@ pub fn execute_command(
     command: Command,
     storage: &mut (impl Storage + ListStorage + SetStorage + StreamStorage),
     queues: &Queues,
-    senders: &Senders,
+    senders: &Notifiers,
 ) -> Result<CommandResponse, Bytes> {
     let command_response: CommandResponse = match command {
         Command::Ping => RedisValue::SimpleString(Bytes::from_static(b"PONG")).into(),
@@ -190,7 +190,7 @@ pub fn execute_command(
         Command::Publish { channel, message } => match senders.publish_pubsub(channel, message) {
             Ok(rx) => CommandResponse::Block(rx.map_ok(|count| Ok(RedisValue::Int(count))).boxed()),
             Err(err) => {
-                warn!("Failed to publish message due to dropped receiver: {err}");
+                warn!("Failed to publish message due to dropped pubsub receiver: {err}");
                 Err(Bytes::from_static(b"Failed to send message"))?
             }
         },

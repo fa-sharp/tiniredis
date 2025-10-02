@@ -6,9 +6,9 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     arguments::Arguments,
+    notifiers::Notifiers,
     parser::RedisValue,
     queues::Queues,
-    senders::Senders,
     storage::{
         list::{ListDirection, ListStorage},
         set::SetStorage,
@@ -141,7 +141,7 @@ impl Command {
         self,
         storage: &mut (impl Storage + ListStorage + SetStorage + StreamStorage),
         queues: &Queues,
-        senders: &Senders,
+        senders: &Notifiers,
     ) -> Result<CommandResponse, Bytes> {
         executor::execute_command(self, storage, queues, senders)
     }

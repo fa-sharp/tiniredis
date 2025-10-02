@@ -1,8 +1,8 @@
 mod arguments;
 mod command;
+mod notifiers;
 mod parser;
 mod queues;
-mod senders;
 mod storage;
 mod tasks;
 
@@ -27,9 +27,9 @@ use tracing::{debug, info, warn};
 
 use crate::{
     command::{Command, CommandResponse},
+    notifiers::Notifiers,
     parser::*,
     queues::Queues,
-    senders::Senders,
     storage::MemoryStorage,
 };
 
@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
     // Setup storage, queues, and notifiers
     let storage: Arc<Mutex<MemoryStorage>> = Arc::default();
     let queues: Arc<Queues> = Arc::default();
-    let senders: Arc<Senders> = Arc::new(Senders {
+    let notifiers: Arc<Notifiers> = Arc::new(Notifiers {
         bpop: bpop_tx,
         xread: xread_tx,
         pubsub: pubsub_tx,
@@ -96,7 +96,7 @@ async fn main() -> anyhow::Result<()> {
     info!("tinikeyval listening on {host}:{port}...");
 
     tokio::select! {
-        _ = main_loop(listener, storage, queues, senders) => {}
+        _ = main_loop(listener, storage, queues, notifiers) => {}
         _ = shutdown_sig.changed() => {
             info!("shutdown signal received. goodbye for now 👋");
         },
@@ -105,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
     // Ensure all tasks have shut down
     tokio::time::timeout(Duration::from_secs(5), all_tasks.join_all())
         .await
-        .context("task(s) didn't shut down within grace period")?;
+        .context("some task(s) didn't shut down within grace period")?;
     Ok(())
 }
 
@@ -113,7 +113,7 @@ async fn main_loop(
     listener: TcpListener,
     storage: Arc<Mutex<MemoryStorage>>,
     queues: Arc<Queues>,
-    senders: Arc<Senders>,
+    senders: Arc<Notifiers>,
 ) {
     loop {
         match listener.accept().await {
@@ -137,7 +137,7 @@ async fn process(
     mut socket: TcpStream,
     storage: Arc<Mutex<MemoryStorage>>,
     queues: Arc<Queues>,
-    senders: Arc<Senders>,
+    senders: Arc<Notifiers>,
 ) {
     let (reader, writer) = socket.split();
     let mut framed_reader = FramedRead::new(BufReader::new(reader), RespDecoder);
@@ -150,7 +150,7 @@ async fn process(
                     Ok(CommandResponse::Value(value)) => Ok(value),
                     Ok(CommandResponse::Block(rx)) => match rx.await {
                         Ok(res) => res,
-                        Err(_) => break, // blocking sender dropped (unexpected)
+                        Err(_) => Err(Bytes::from_static(b"Failed to receive message")),
                     },
                     Ok(CommandResponse::Subscribed(rx)) => {
                         debug!("Entering subscribe mode");
@@ -186,7 +186,7 @@ async fn process_command(
     value: Result<RedisValue, RedisParseError>,
     storage: &Mutex<MemoryStorage>,
     queues: &Queues,
-    senders: &Senders,
+    senders: &Notifiers,
 ) -> anyhow::Result<Result<CommandResponse, Bytes>> {
     let value = value?;
     debug!("Received value: {:?}", value);
@@ -211,14 +211,24 @@ async fn subscribe_mode(
         tokio::select! {
             Some(message) = rx.recv() => {
                 debug!("message received: {message:?}");
-                let write_res = writer.send(message).await;
-                if let Err(e) = write_res {
+                if let Err(e) = writer.send(message).await {
                     debug!("exiting subscribe mode due to write error: {e}");
                     break;
                 }
             }
             Some(reader_res) = reader.next() => {
                 debug!("got input: {reader_res:?}");
+                match reader_res {
+                    Ok(command) => match command.into_bytes().as_deref() {
+                        Some(b"QUIT") => break,
+                        Some(_) => todo!(),
+                        None => todo!(),
+                    },
+                    Err(e) => {
+                        debug!("exiting subscribe mode due to write error: {e}");
+                        break;
+                    },
+                }
             }
             else => {
                 debug!("exiting subscribe mode due to else clause reached");

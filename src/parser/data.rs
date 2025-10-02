@@ -13,11 +13,11 @@ pub fn parse(buf: &BytesMut, pos: usize) -> RedisParseResult {
     }
 
     match buf[pos] {
-        b'+' => simple_string(buf, pos + 1),
-        b'-' => error(buf, pos + 1),
-        b'$' => bulk_string(buf, pos + 1),
-        b':' => resp_int(buf, pos + 1),
-        b'*' => array(buf, pos + 1),
+        constants::SIMPLE_STRING_TAG => simple_string(buf, pos + 1),
+        constants::ERROR_TAG => error(buf, pos + 1),
+        constants::BULK_STRING_TAG => bulk_string(buf, pos + 1),
+        constants::INT_TAG => resp_int(buf, pos + 1),
+        constants::ARRAY_TAG => array(buf, pos + 1),
         u => Err(RedisParseError::UnknownStartingByte(u)),
     }
 }

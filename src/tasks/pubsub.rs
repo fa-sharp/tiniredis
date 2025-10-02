@@ -21,6 +21,7 @@ pub async fn pubsub_task(
     mut shutdown: watch::Receiver<bool>,
 ) {
     loop {
+        // Receive a publish command
         let (channel, message, send_count_tx) = tokio::select! {
             opt = pubsub_rx.recv()=> {
                 match opt {
@@ -38,7 +39,7 @@ pub async fn pubsub_task(
         let mut send_count = 0;
         for client in pubsub_queue
             .iter()
-            .filter(|client| client.channels.contains(&channel))
+            .filter(|client| client.channels.contains(&channel) && !client.tx.is_closed())
         {
             // Send message to subscribed clients
             let message_val = RedisValue::Array(vec![
@@ -52,7 +53,7 @@ pub async fn pubsub_task(
             }
         }
 
-        // Send back the number of clients that message was sent to
+        // Send back the number of clients that message was successfully sent to
         send_count_tx.send(send_count).ok();
     }
 }

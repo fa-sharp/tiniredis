@@ -3,13 +3,13 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 
 /// Holds the senders/notifiers
-pub struct Senders {
+pub struct Notifiers {
     pub bpop: mpsc::UnboundedSender<Bytes>,
     pub xread: mpsc::UnboundedSender<Bytes>,
     pub pubsub: mpsc::UnboundedSender<(Bytes, Bytes, oneshot::Sender<i64>)>,
 }
 
-impl Senders {
+impl Notifiers {
     /// Notify blocking pop task that a list was pushed
     pub fn notify_bpop(&self, list_key: Bytes) {
         if self.bpop.send(list_key).is_err() {
