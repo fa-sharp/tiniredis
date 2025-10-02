@@ -145,7 +145,7 @@ async fn process(
     let mut writer = FramedWrite::new(BufWriter::new(writer), RespEncoder);
 
     while let Some(value) = reader.next().await {
-        match process_command(value, &storage, &queues, &notifiers).await {
+        let response = match process_command(value, &storage, &queues, &notifiers).await {
             Ok(command_result) => {
                 let response_result = match command_result {
                     Ok(CommandResponse::Value(value)) => Ok(value),
@@ -160,26 +160,28 @@ async fn process(
                     }
                     Err(err) => Err(err),
                 };
-                let response = match response_result {
+                match response_result {
                     Ok(val) => val,
                     Err(err) => RedisValue::Error(err),
-                };
-                debug!("Response: {:?}", response);
-                if let Err(err) = writer.send(response).await {
-                    warn!("Failed to send response: {err}");
-                    break;
                 }
             }
             Err(err) => {
                 let message = err.to_string();
                 info!("Error processing command: {message}");
-                let error_value = RedisValue::Error(Bytes::from(message.into_bytes()));
-                if let Err(err) = writer.send(error_value).await {
-                    warn!("Failed to send error response: {err}");
-                    break;
-                }
+                RedisValue::Error(Bytes::from(message.into_bytes()))
             }
         };
+
+        debug!("Response: {:?}", response);
+        let write_err = if reader.read_buffer().len() > 0 {
+            writer.feed(response).await.err() // feed response if reader has more data (e.g. client is pipelining)
+        } else {
+            writer.send(response).await.err()
+        };
+        if let Some(err) = write_err {
+            warn!("Failed to send response: {err}");
+            break;
+        }
     }
 
     writer.close().await.ok();

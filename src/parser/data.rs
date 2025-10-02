@@ -32,7 +32,7 @@ pub fn simple_string(buf: &BytesMut, pos: usize) -> RedisParseResult {
 pub fn bulk_string(buf: &BytesMut, pos: usize) -> RedisParseResult {
     match base::int(buf, pos)? {
         Some((bad_len, _)) if bad_len < -1 => Err(RedisParseError::BadBulkStringSize(bad_len)),
-        Some((-1, next_pos)) => Ok(Some((RedisValueRef::NulString, next_pos))),
+        Some((-1, next_pos)) => Ok(Some((RedisValueRef::NilString, next_pos))),
         Some((len, next_pos)) => {
             let end_pos = next_pos + len as usize;
             if buf.len() < end_pos + constants::CRLF_LEN {
@@ -58,7 +58,7 @@ pub fn resp_int(buf: &BytesMut, pos: usize) -> RedisParseResult {
 pub fn array(buf: &BytesMut, pos: usize) -> RedisParseResult {
     match base::int(buf, pos)? {
         Some((bad_len, _)) if bad_len < -1 => Err(RedisParseError::BadArraySize(bad_len)),
-        Some((-1, next_pos)) => Ok(Some((RedisValueRef::NulArray, next_pos))),
+        Some((-1, next_pos)) => Ok(Some((RedisValueRef::NilArray, next_pos))),
         Some((len, next_pos)) => {
             let mut elems = Vec::with_capacity(len as usize);
             let mut current_pos = next_pos;

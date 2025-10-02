@@ -28,6 +28,16 @@ pub enum RedisValue {
     NilString,
 }
 
+/// References to values within the raw RESP response bytes
+enum RedisValueRef {
+    String(BufWindow),
+    Error(BufWindow),
+    Int(i64),
+    Array(Vec<RedisValueRef>),
+    NilArray,
+    NilString,
+}
+
 impl RedisValue {
     /// If value is a string, get the bytes
     pub fn as_bytes(&self) -> Option<&Bytes> {
@@ -45,16 +55,6 @@ impl RedisValue {
     }
 }
 
-/// References to values within the raw RESP response bytes
-enum RedisValueRef {
-    String(BufWindow),
-    Error(BufWindow),
-    Int(i64),
-    Array(Vec<RedisValueRef>),
-    NulArray,
-    NulString,
-}
-
 impl RedisValueRef {
     /// Get the underlying Redis value that this window is pointing at
     fn extract_redis_value(self, buf: &Bytes) -> Result<RedisValue, RedisParseError> {
@@ -68,8 +68,8 @@ impl RedisValueRef {
                     .map(|value_ref| value_ref.extract_redis_value(buf))
                     .collect::<Result<_, _>>()?,
             ),
-            RedisValueRef::NulArray => RedisValue::NilArray,
-            RedisValueRef::NulString => RedisValue::NilString,
+            RedisValueRef::NilArray => RedisValue::NilArray,
+            RedisValueRef::NilString => RedisValue::NilString,
         })
     }
 }

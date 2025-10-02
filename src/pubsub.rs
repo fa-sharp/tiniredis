@@ -6,7 +6,7 @@ use tokio::{
     sync::mpsc,
 };
 use tokio_util::codec::{FramedRead, FramedWrite};
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::{
     arguments::Arguments,
@@ -24,34 +24,30 @@ pub async fn subscribe_mode(
     writer: &mut FramedWrite<impl AsyncWrite + Unpin, RespEncoder>,
 ) {
     loop {
-        tokio::select! {
+        let response = tokio::select! {
             Some(message) = rx.recv() => {
                 debug!("message received: {message:?}");
-                if let Err(e) = writer.send(message).await {
-                    debug!("exiting subscribe mode due to write error: {e}");
-                    break;
-                }
+                message
             }
             Some(reader_res) = reader.next() => {
-                let response = match reader_res {
+                match reader_res {
                     Ok(raw_command) => match process_pubsub_command(raw_command, client_id, notifiers) {
                         Ok(_) => continue,
-                        Err(err) => {
-                            info!("error executing command: {err}");
-                            RedisValue::Error(Bytes::from(err.to_string()))
-                        },
+                        Err(err) => RedisValue::Error(Bytes::from(err.to_string())),
                     },
                     Err(err) => {
                         debug!("exiting subscribe mode due to read error: {err}");
                         break;
                     }
-                };
-                if let Err(e) = writer.send(response).await {
-                    debug!("exiting subscribe mode due to write error: {e}");
-                    break;
                 }
             }
             else => break
+        };
+
+        debug!("response: {response:?}");
+        if let Err(e) = writer.send(response).await {
+            debug!("exiting subscribe mode due to write error: {e}");
+            break;
         }
     }
 }
