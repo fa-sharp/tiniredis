@@ -96,10 +96,21 @@ pub enum Command {
         key: Bytes,
         member: Bytes,
     },
+    ZScore {
+        key: Bytes,
+        member: Bytes,
+    },
     ZRange {
         key: Bytes,
         start: i64,
         stop: i64,
+    },
+    ZCard {
+        key: Bytes,
+    },
+    ZRem {
+        key: Bytes,
+        members: Vec<Bytes>,
     },
     XAdd {
         key: Bytes,

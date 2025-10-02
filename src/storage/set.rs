@@ -7,7 +7,7 @@ use super::{MemoryStorage, RedisDataType, RedisObject, StorageResult as Result};
 /// Set interface
 pub trait SetStorage {
     fn sadd(&mut self, key: Bytes, members: Vec<Bytes>) -> Result<i64>;
-    fn srem(&mut self, key: Bytes, members: Vec<Bytes>) -> Result<i64>;
+    fn srem(&mut self, key: &Bytes, members: Vec<Bytes>) -> Result<i64>;
     fn scard(&self, key: &Bytes) -> Result<i64>;
     fn smembers(&self, key: &Bytes) -> Result<Vec<Bytes>>;
     fn sismember(&self, key: &Bytes, member: &Bytes) -> Result<bool>;
@@ -24,19 +24,18 @@ impl SetStorage for MemoryStorage {
         Ok(num_inserted.try_into().unwrap_or_default())
     }
 
-    fn srem(&mut self, key: Bytes, members: Vec<Bytes>) -> Result<i64> {
-        if self.get(&key).is_none() {
+    fn srem(&mut self, key: &Bytes, members: Vec<Bytes>) -> Result<i64> {
+        let Some(set) = self.get_set_mut(&key)? else {
             return Ok(0);
-        }
+        };
 
-        let set = self.get_set_entry(key.clone())?;
         let num_removed = members
             .iter()
             .map(|m| set.remove(m))
             .filter(|removed| *removed)
             .count();
         if set.is_empty() {
-            self.data.remove(&key);
+            self.data.remove(key);
         }
 
         Ok(num_removed.try_into().unwrap_or_default())
@@ -75,6 +74,14 @@ impl MemoryStorage {
             return Err(NOT_SET);
         };
         Ok(Some(set))
+    }
+
+    fn get_set_mut(&mut self, key: &Bytes) -> Result<Option<&mut HashSet<Bytes>>> {
+        match self.get_mut(key) {
+            Some(RedisDataType::Set(set)) => Ok(Some(set)),
+            Some(_) => Err(NOT_SET),
+            None => Ok(None),
+        }
     }
 
     fn get_set_entry(&mut self, key: Bytes) -> Result<&mut HashSet<Bytes>> {

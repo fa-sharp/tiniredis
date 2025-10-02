@@ -35,6 +35,7 @@ impl PartialOrd for RankedItem {
         Some(self.cmp(other))
     }
 }
+// Equality by member only
 impl Eq for RankedItem {}
 impl PartialEq for RankedItem {
     fn eq(&self, other: &Self) -> bool {
@@ -47,6 +48,9 @@ pub trait SortedSetStorage {
     fn zadd(&mut self, key: Bytes, members: Vec<(f64, Bytes)>) -> Result<i64>;
     fn zrank(&self, key: &Bytes, member: Bytes) -> Result<Option<i64>>;
     fn zrange(&self, key: &Bytes, start: i64, stop: i64) -> Result<Vec<Bytes>>;
+    fn zcard(&self, key: &Bytes) -> Result<i64>;
+    fn zscore(&self, key: &Bytes, member: &Bytes) -> Result<Option<f64>>;
+    fn zrem(&mut self, key: &Bytes, member: Vec<Bytes>) -> Result<i64>;
 }
 
 impl SortedSetStorage for MemoryStorage {
@@ -138,6 +142,39 @@ impl SortedSetStorage for MemoryStorage {
             .map(|item| item.member.clone())
             .collect())
     }
+
+    fn zcard(&self, key: &Bytes) -> Result<i64> {
+        Ok(match self.get_sorted_set(key)? {
+            Some(SortedSet(hash, _)) => hash.len().try_into().unwrap_or_default(),
+            None => 0,
+        })
+    }
+
+    fn zscore(&self, key: &Bytes, member: &Bytes) -> Result<Option<f64>> {
+        let Some(SortedSet(hash, _)) = self.get_sorted_set(key)? else {
+            return Ok(None);
+        };
+        Ok(hash.get(member).copied())
+    }
+
+    fn zrem(&mut self, key: &Bytes, members: Vec<Bytes>) -> Result<i64> {
+        let Some(SortedSet(hash, ranked)) = self.get_sorted_set_mut(&key)? else {
+            return Ok(0);
+        };
+
+        let mut num_removed = 0;
+        for member in members {
+            if let Some((member, score)) = hash.remove_entry(&member) {
+                ranked.remove(&RankedItem { member, score });
+                num_removed += 1;
+            }
+        }
+        if hash.is_empty() {
+            self.data.remove(key);
+        }
+
+        Ok(num_removed)
+    }
 }
 
 const NOT_SORTED_SET: Bytes = Bytes::from_static(b"Not a sorted set");
@@ -156,6 +193,14 @@ impl MemoryStorage {
         }
 
         Ok(Some(set))
+    }
+
+    fn get_sorted_set_mut(&mut self, key: &Bytes) -> Result<Option<&mut SortedSet>> {
+        match self.get_mut(key) {
+            Some(RedisDataType::SortedSet(set)) => Ok(Some(set)),
+            Some(_) => Err(NOT_SORTED_SET),
+            None => Ok(None),
+        }
     }
 
     fn get_sorted_set_entry(&mut self, key: Bytes) -> Result<&mut SortedSet> {

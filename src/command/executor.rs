@@ -113,7 +113,7 @@ pub fn execute_command(
             RedisValue::Array(elems.into_iter().map(RedisValue::String).collect()).into()
         }
         Command::SAdd { key, members } => RedisValue::Int(storage.sadd(key, members)?).into(),
-        Command::SRem { key, members } => RedisValue::Int(storage.srem(key, members)?).into(),
+        Command::SRem { key, members } => RedisValue::Int(storage.srem(&key, members)?).into(),
         Command::SCard { key } => RedisValue::Int(storage.scard(&key)?).into(),
         Command::SMembers { key } => {
             let members = storage.smembers(&key)?;
@@ -128,10 +128,16 @@ pub fn execute_command(
             Some(rank) => RedisValue::Int(rank).into(),
             None => RedisValue::NilString.into(),
         },
+        Command::ZScore { key, member } => match storage.zscore(&key, &member)? {
+            Some(score) => RedisValue::String(Bytes::from(score.to_string())).into(),
+            None => RedisValue::NilString.into(),
+        },
+        Command::ZCard { key } => RedisValue::Int(storage.zcard(&key)?).into(),
         Command::ZRange { key, start, stop } => {
             let members = storage.zrange(&key, start, stop)?;
             RedisValue::Array(members.into_iter().map(RedisValue::String).collect()).into()
         }
+        Command::ZRem { key, members } => RedisValue::Int(storage.zrem(&key, members)?).into(),
         Command::XAdd { key, id, data } => {
             let id = storage.xadd(key.clone(), id, data)?;
             notifiers.xread_notify(key); // notify blocking XREAD task

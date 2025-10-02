@@ -129,11 +129,27 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             let member = args.pop("member")?;
             Command::ZRank { key, member }
         }
+        "ZSCORE" => {
+            let key = args.pop("key")?;
+            let member = args.pop("member")?;
+            Command::ZScore { key, member }
+        }
+        "ZCARD" => Command::ZCard {
+            key: args.pop("key")?,
+        },
         "ZRANGE" => {
             let key = args.pop("key")?;
             let start = args.pop_parse("start index")?;
             let stop = args.pop_parse("stop index")?;
             Command::ZRange { key, start, stop }
+        }
+        "ZREM" => {
+            let key = args.pop("key")?;
+            let mut members = vec![args.pop("member")?];
+            while let Some(member) = args.pop_optional() {
+                members.push(member);
+            }
+            Command::ZRem { key, members }
         }
         "XADD" => {
             let key = args.pop("key")?;
