@@ -128,6 +128,10 @@ pub fn execute_command(
             Some(rank) => RedisValue::Int(rank).into(),
             None => RedisValue::NilString.into(),
         },
+        Command::ZRange { key, start, stop } => {
+            let members = storage.zrange(&key, start, stop)?;
+            RedisValue::Array(members.into_iter().map(RedisValue::String).collect()).into()
+        }
         Command::XAdd { key, id, data } => {
             let id = storage.xadd(key.clone(), id, data)?;
             notifiers.xread_notify(key); // notify blocking XREAD task

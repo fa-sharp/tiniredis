@@ -129,6 +129,12 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             let member = args.pop("member")?;
             Command::ZRank { key, member }
         }
+        "ZRANGE" => {
+            let key = args.pop("key")?;
+            let start = args.pop_parse("start index")?;
+            let stop = args.pop_parse("stop index")?;
+            Command::ZRange { key, start, stop }
+        }
         "XADD" => {
             let key = args.pop("key")?;
             let id = args.pop("id")?;

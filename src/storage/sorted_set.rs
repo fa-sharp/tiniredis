@@ -4,7 +4,6 @@ use std::{
 };
 
 use bytes::Bytes;
-use tracing::debug;
 
 use super::{MemoryStorage, RedisDataType, RedisObject, StorageResult as Result};
 
@@ -21,13 +20,9 @@ pub struct RankedItem {
     score: f64,
 }
 
-/// Margin for f64 equality
-// const F64_MARGIN: f64 = 1e-10;
-
 // Ordering by score then member
 impl Ord for RankedItem {
     fn cmp(&self, other: &Self) -> Ordering {
-        // ((self.score - F64_MARGIN)..(self.score + F64_MARGIN)).contains(&other.score)
         match self.score.total_cmp(&other.score) {
             Ordering::Less => Ordering::Less,
             Ordering::Greater => Ordering::Greater,
@@ -51,6 +46,7 @@ impl PartialEq for RankedItem {
 pub trait SortedSetStorage {
     fn zadd(&mut self, key: Bytes, members: Vec<(f64, Bytes)>) -> Result<i64>;
     fn zrank(&self, key: &Bytes, member: Bytes) -> Result<Option<i64>>;
+    fn zrange(&self, key: &Bytes, start: i64, stop: i64) -> Result<Vec<Bytes>>;
 }
 
 impl SortedSetStorage for MemoryStorage {
@@ -80,7 +76,6 @@ impl SortedSetStorage for MemoryStorage {
             }
         }
 
-        debug!("{:?}", (hash, ranked));
         Ok(num_added)
     }
 
@@ -102,12 +97,51 @@ impl SortedSetStorage for MemoryStorage {
             )
             .count();
 
-        debug!("{:?}", (hash, ranked));
         Ok(Some(rank.try_into().unwrap_or_default()))
+    }
+
+    fn zrange(&self, key: &Bytes, start: i64, stop: i64) -> Result<Vec<Bytes>> {
+        let Some(SortedSet(_, ranked)) = self.get_sorted_set(key)? else {
+            return Ok(Vec::new());
+        };
+        let length = ranked.len();
+
+        let beg: usize = if start < 0 {
+            length
+                .checked_add_signed(start.try_into().unwrap_or_default())
+                .unwrap_or_default()
+        } else {
+            start as usize
+        };
+        if beg >= length {
+            return Ok(Vec::new());
+        }
+
+        let mut end: usize = if stop < 0 {
+            length
+                .checked_add_signed(stop.try_into().unwrap_or_default())
+                .unwrap_or_default()
+        } else {
+            stop as usize
+        };
+        if end >= length {
+            end = length - 1;
+        }
+        if beg > end {
+            return Ok(Vec::new());
+        }
+
+        Ok(ranked
+            .iter()
+            .skip(beg)
+            .take(end - beg + 1)
+            .map(|item| item.member.clone())
+            .collect())
     }
 }
 
 const NOT_SORTED_SET: Bytes = Bytes::from_static(b"Not a sorted set");
+const MALFORMED: Bytes = Bytes::from_static(b"Sorted set is malformed");
 
 impl MemoryStorage {
     fn get_sorted_set(&self, key: &Bytes) -> Result<Option<&SortedSet>> {
@@ -117,6 +151,10 @@ impl MemoryStorage {
         let RedisDataType::SortedSet(set) = data else {
             return Err(NOT_SORTED_SET);
         };
+        if set.0.len() != set.1.len() {
+            return Err(MALFORMED);
+        }
+
         Ok(Some(set))
     }
 
@@ -125,6 +163,9 @@ impl MemoryStorage {
         let RedisDataType::SortedSet(ref mut set) = entry.data else {
             return Err(NOT_SORTED_SET);
         };
+        if set.0.len() != set.1.len() {
+            return Err(MALFORMED);
+        }
         Ok(set)
     }
 }

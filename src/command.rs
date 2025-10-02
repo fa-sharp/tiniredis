@@ -96,6 +96,11 @@ pub enum Command {
         key: Bytes,
         member: Bytes,
     },
+    ZRange {
+        key: Bytes,
+        start: i64,
+        stop: i64,
+    },
     XAdd {
         key: Bytes,
         id: Bytes,
