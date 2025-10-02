@@ -5,5 +5,5 @@ mod xread;
 
 pub use bpop::{bpop_task, BPopClient};
 pub use cleanup::cleanup_task;
-pub use pubsub::{pubsub_task, PubSubClient};
+pub use pubsub::{pubsub_task, PubSubClient, PubSubEvent};
 pub use xread::{xread_task, XReadClient};

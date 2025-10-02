@@ -120,7 +120,7 @@ pub enum CommandResponse {
     /// A blocking response
     Block(BoxFuture<'static, Result<Result<RedisValue, Bytes>, oneshot::error::RecvError>>),
     /// Subscribed to pubsub
-    Subscribed(mpsc::UnboundedReceiver<RedisValue>),
+    Subscribed(u64, mpsc::UnboundedReceiver<RedisValue>),
 }
 impl From<RedisValue> for CommandResponse {
     fn from(value: RedisValue) -> Self {
@@ -141,8 +141,8 @@ impl Command {
         self,
         storage: &mut (impl Storage + ListStorage + SetStorage + StreamStorage),
         queues: &Queues,
-        senders: &Notifiers,
+        notifiers: &Notifiers,
     ) -> Result<CommandResponse, Bytes> {
-        executor::execute_command(self, storage, queues, senders)
+        executor::execute_command(self, storage, queues, notifiers)
     }
 }

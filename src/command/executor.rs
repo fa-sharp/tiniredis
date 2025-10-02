@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{FutureExt, TryFutureExt};
@@ -16,7 +16,7 @@ use crate::{
         stream::{StreamEntry, StreamStorage},
         Storage,
     },
-    tasks::{BPopClient, PubSubClient, XReadClient},
+    tasks::{BPopClient, XReadClient},
 };
 
 /// Execute the command, and format the response into [`RedisValue`] (RESP format)
@@ -24,7 +24,7 @@ pub fn execute_command(
     command: Command,
     storage: &mut (impl Storage + ListStorage + SetStorage + StreamStorage),
     queues: &Queues,
-    senders: &Notifiers,
+    notifiers: &Notifiers,
 ) -> Result<CommandResponse, Bytes> {
     let command_response: CommandResponse = match command {
         Command::Ping => RedisValue::SimpleString(Bytes::from_static(b"PONG")).into(),
@@ -55,7 +55,7 @@ pub fn execute_command(
         }
         Command::Push { key, elems, dir } => {
             let len = storage.push(key.clone(), elems, dir)?;
-            senders.notify_bpop(key); // notify blocking POP task
+            notifiers.bpop_notify(key); // notify blocking POP task
             RedisValue::Int(len).into()
         }
         Command::Pop { key, dir, count } => match storage.pop(&key, dir, count) {
@@ -124,7 +124,7 @@ pub fn execute_command(
         },
         Command::XAdd { key, id, data } => {
             let id = storage.xadd(key.clone(), id, data)?;
-            senders.notify_xread(key); // notify blocking XREAD task
+            notifiers.xread_notify(key); // notify blocking XREAD task
             RedisValue::String(format_stream_id(id)).into()
         }
         Command::XLen { key } => RedisValue::Int(storage.xlen(&key)).into(),
@@ -172,25 +172,19 @@ pub fn execute_command(
         }
         Command::Subscribe { channels } => {
             let (tx, rx) = mpsc::unbounded_channel();
-            let channels = HashSet::from_iter(channels);
-            let init_messages = channels.iter().enumerate().map(|(idx, channel)| {
-                RedisValue::Array(vec![
-                    RedisValue::String(Bytes::from_static(b"subscribe")),
-                    RedisValue::String(channel.clone()),
-                    RedisValue::Int((idx + 1).try_into().unwrap_or_default()),
-                ])
-            });
-            for message in init_messages {
-                tx.send(message).expect("channel should be open");
+            let client_id = queues.pubsub_add(tx);
+            match notifiers.pubsub_subscribe(client_id, channels) {
+                Ok(_) => CommandResponse::Subscribed(client_id, rx),
+                Err(err) => {
+                    warn!("dropped pubsub receiver: {err}");
+                    Err(Bytes::from_static(b"Failed to subscribe"))?
+                }
             }
-
-            queues.pubsub_add(PubSubClient { tx, channels });
-            CommandResponse::Subscribed(rx)
         }
-        Command::Publish { channel, message } => match senders.publish_pubsub(channel, message) {
+        Command::Publish { channel, message } => match notifiers.pubsub_publish(channel, message) {
             Ok(rx) => CommandResponse::Block(rx.map_ok(|count| Ok(RedisValue::Int(count))).boxed()),
             Err(err) => {
-                warn!("Failed to publish message due to dropped pubsub receiver: {err}");
+                warn!("dropped pubsub receiver: {err}");
                 Err(Bytes::from_static(b"Failed to send message"))?
             }
         },

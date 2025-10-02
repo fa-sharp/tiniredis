@@ -2,6 +2,7 @@ mod arguments;
 mod command;
 mod notifiers;
 mod parser;
+mod pubsub;
 mod queues;
 mod storage;
 mod tasks;
@@ -17,7 +18,7 @@ use anyhow::Context;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use tokio::{
-    io::{AsyncBufRead, AsyncWrite, BufReader, BufWriter},
+    io::{BufReader, BufWriter},
     net::{TcpListener, TcpStream},
     sync::{mpsc, watch},
     task::JoinSet,
@@ -113,7 +114,7 @@ async fn main_loop(
     listener: TcpListener,
     storage: Arc<Mutex<MemoryStorage>>,
     queues: Arc<Queues>,
-    senders: Arc<Notifiers>,
+    notifiers: Arc<Notifiers>,
 ) {
     loop {
         match listener.accept().await {
@@ -123,7 +124,7 @@ async fn main_loop(
                     stream,
                     Arc::clone(&storage),
                     Arc::clone(&queues),
-                    Arc::clone(&senders),
+                    Arc::clone(&notifiers),
                 ));
             }
             Err(e) => warn!("Error connecting to client: {e}"),
@@ -137,14 +138,14 @@ async fn process(
     mut socket: TcpStream,
     storage: Arc<Mutex<MemoryStorage>>,
     queues: Arc<Queues>,
-    senders: Arc<Notifiers>,
+    notifiers: Arc<Notifiers>,
 ) {
     let (reader, writer) = socket.split();
-    let mut framed_reader = FramedRead::new(BufReader::new(reader), RespDecoder);
-    let mut framed_writer = FramedWrite::new(BufWriter::new(writer), RespEncoder);
+    let mut reader = FramedRead::new(BufReader::new(reader), RespDecoder);
+    let mut writer = FramedWrite::new(BufWriter::new(writer), RespEncoder);
 
-    while let Some(value) = framed_reader.next().await {
-        match process_command(value, &storage, &queues, &senders).await {
+    while let Some(value) = reader.next().await {
+        match process_command(value, &storage, &queues, &notifiers).await {
             Ok(command_result) => {
                 let response_result = match command_result {
                     Ok(CommandResponse::Value(value)) => Ok(value),
@@ -152,9 +153,9 @@ async fn process(
                         Ok(res) => res,
                         Err(_) => Err(Bytes::from_static(b"Failed to receive message")),
                     },
-                    Ok(CommandResponse::Subscribed(rx)) => {
+                    Ok(CommandResponse::Subscribed(id, rx)) => {
                         debug!("Entering subscribe mode");
-                        subscribe_mode(rx, &mut framed_reader, &mut framed_writer).await;
+                        pubsub::subscribe_mode(id, rx, &notifiers, &mut reader, &mut writer).await;
                         continue;
                     }
                     Err(err) => Err(err),
@@ -164,7 +165,7 @@ async fn process(
                     Err(err) => RedisValue::Error(err),
                 };
                 debug!("Response: {:?}", response);
-                if let Err(err) = framed_writer.send(response).await {
+                if let Err(err) = writer.send(response).await {
                     warn!("Failed to send response: {err}");
                     break;
                 }
@@ -173,12 +174,15 @@ async fn process(
                 let message = err.to_string();
                 info!("Error processing command: {message}");
                 let error_value = RedisValue::Error(Bytes::from(message.into_bytes()));
-                framed_writer.send(error_value).await.ok();
+                if let Err(err) = writer.send(error_value).await {
+                    warn!("Failed to send error response: {err}");
+                    break;
+                }
             }
         };
     }
 
-    framed_writer.close().await.ok();
+    writer.close().await.ok();
 }
 
 /// Parse, execute, and respond to the incoming command
@@ -186,7 +190,7 @@ async fn process_command(
     value: Result<RedisValue, RedisParseError>,
     storage: &Mutex<MemoryStorage>,
     queues: &Queues,
-    senders: &Notifiers,
+    notifiers: &Notifiers,
 ) -> anyhow::Result<Result<CommandResponse, Bytes>> {
     let value = value?;
     debug!("Received value: {:?}", value);
@@ -196,46 +200,9 @@ async fn process_command(
 
     let command_response = {
         let mut storage_lock = storage.lock().unwrap();
-        command.execute(storage_lock.deref_mut(), queues, senders)
+        command.execute(storage_lock.deref_mut(), queues, notifiers)
     };
     Ok(command_response)
-}
-
-#[tracing::instrument(skip(rx, reader, writer))]
-async fn subscribe_mode(
-    mut rx: mpsc::UnboundedReceiver<RedisValue>,
-    reader: &mut FramedRead<impl AsyncBufRead + Unpin + std::fmt::Debug, RespDecoder>,
-    writer: &mut FramedWrite<impl AsyncWrite + Unpin + std::fmt::Debug, RespEncoder>,
-) {
-    loop {
-        tokio::select! {
-            Some(message) = rx.recv() => {
-                debug!("message received: {message:?}");
-                if let Err(e) = writer.send(message).await {
-                    debug!("exiting subscribe mode due to write error: {e}");
-                    break;
-                }
-            }
-            Some(reader_res) = reader.next() => {
-                debug!("got input: {reader_res:?}");
-                match reader_res {
-                    Ok(command) => match command.into_bytes().as_deref() {
-                        Some(b"QUIT") => break,
-                        Some(_) => todo!(),
-                        None => todo!(),
-                    },
-                    Err(e) => {
-                        debug!("exiting subscribe mode due to write error: {e}");
-                        break;
-                    },
-                }
-            }
-            else => {
-                debug!("exiting subscribe mode due to else clause reached");
-                break
-            }
-        }
-    }
 }
 
 /// For graceful shutdown, setup a signal listener with tokio watch channel

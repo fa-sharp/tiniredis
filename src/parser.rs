@@ -17,7 +17,7 @@ pub use errors::RedisParseError;
 use bytes::{Bytes, BytesMut};
 
 /// Represents a parsed RESP value, and/or a RESP value that can be sent as a response
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum RedisValue {
     String(Bytes),
     SimpleString(Bytes),
