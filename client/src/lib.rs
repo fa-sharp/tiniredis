@@ -4,7 +4,7 @@ use bytes::Bytes;
 use futures::{SinkExt, TryStreamExt};
 use tinikeyval::protocol::{RedisParseError, RedisValue, RespCodec};
 use tokio::{
-    io::{self, BufReader, BufWriter},
+    io::{BufReader, BufWriter},
     net::TcpStream,
     sync::Mutex,
     time::timeout,
@@ -19,6 +19,8 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Failed to parse: {0}")]
     Parse(#[from] RedisParseError),
+    #[error("Error response from Redis: {0:?}")]
+    ResponseError(Bytes),
     #[error("Disconnected")]
     Disconnected,
 }
@@ -33,14 +35,40 @@ struct ClientInner {
     cxn: Framed<BufWriter<BufReader<TcpStream>>, RespCodec>,
 }
 
-const TIMEOUT: Duration = Duration::from_secs(5);
+/// A parsed Redis value
+#[derive(Debug, PartialEq)]
+pub enum Value {
+    String(Bytes),
+    Array(Vec<Value>),
+    Int(i64),
+    Nil,
+}
+
+impl TryFrom<RedisValue> for Value {
+    type Error = Error;
+
+    fn try_from(value: RedisValue) -> Result<Self, Self::Error> {
+        Ok(match value {
+            RedisValue::String(bytes) | RedisValue::SimpleString(bytes) => Value::String(bytes),
+            RedisValue::Error(bytes) => Err(Error::ResponseError(bytes))?,
+            RedisValue::Int(i) => Value::Int(i),
+            RedisValue::Array(values) => {
+                let converted = values.into_iter().map(Value::try_from);
+                Value::Array(converted.collect::<Result<_, _>>()?)
+            }
+            RedisValue::NilArray | RedisValue::NilString => Value::Nil,
+        })
+    }
+}
+
+const TIMEOUT: Duration = Duration::from_secs(6);
 const PING: Bytes = Bytes::from_static(b"PING");
 
 impl Client {
     /// Connect to the Redis server and create a client
     pub async fn connect(url: &str) -> Result<Self, Error> {
         let tcp_stream = TcpStream::connect(url).await?;
-        let mut cxn = RespCodec::framed_io(io::BufWriter::new(io::BufReader::new(tcp_stream)));
+        let mut cxn = RespCodec::framed_io(BufWriter::new(BufReader::new(tcp_stream)));
 
         // Ping the server to verify connection
         cxn.send(RedisValue::Array(vec![RedisValue::String(PING)]))
@@ -56,13 +84,21 @@ impl Client {
     }
 
     /// Send a raw command to the Redis server and get the response
-    pub async fn send(&self, command: Vec<Bytes>) -> Result<RedisValue, Error> {
+    pub async fn send<S>(&self, command: Vec<S>) -> Result<Value, Error>
+    where
+        S: AsRef<str>,
+    {
+        fn str_to_bulk_string<S: AsRef<str>>(s: S) -> RedisValue {
+            RedisValue::String(Bytes::copy_from_slice(s.as_ref().as_bytes()))
+        }
+        let raw_command = RedisValue::Array(command.into_iter().map(str_to_bulk_string).collect());
         let mut inner = self.inner.lock().await;
-        let command_val = RedisValue::Array(command.into_iter().map(RedisValue::String).collect());
-        inner.cxn.send(command_val).await?;
-        timeout(TIMEOUT, inner.cxn.try_next())
+        inner.cxn.send(raw_command).await?;
+        let raw_response = timeout(TIMEOUT, inner.cxn.try_next())
             .await??
-            .ok_or(Error::Disconnected)
+            .ok_or(Error::Disconnected)?;
+
+        Value::try_from(raw_response)
     }
 }
 
@@ -81,8 +117,8 @@ mod tests {
     #[tokio::test]
     async fn ping() -> ClientResult<()> {
         let client = Client::connect(LOCALHOST).await?;
-        let pong = client.send(vec![PING]).await?;
-        assert_eq!(pong, RedisValue::String(Bytes::from_static(b"PONG")));
+        let pong = client.send(vec!["PING"]).await?;
+        assert_eq!(pong, Value::String(Bytes::from_static(b"PONG")));
 
         Ok(())
     }
@@ -90,19 +126,32 @@ mod tests {
     #[tokio::test]
     async fn get_and_set() -> ClientResult<()> {
         let client = Client::connect(LOCALHOST).await?;
-        let res = client
-            .send(vec![
-                Bytes::from_static(b"SET"),
-                Bytes::from_static(b"foo"),
-                Bytes::from_static(b"bar"),
-            ])
-            .await?;
-        assert_eq!(res, RedisValue::String(Bytes::from_static(b"OK")));
+        let res = client.send(vec!["SET", "foo", "bar"]).await?;
+        assert_eq!(res, Value::String(Bytes::from_static(b"OK")));
 
+        let res = client.send(vec!["GET", "foo"]).await?;
+        assert_eq!(res, Value::String(Bytes::from_static(b"bar")));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sorted_set() -> ClientResult<()> {
+        let client = Client::connect(LOCALHOST).await?;
         let res = client
-            .send(vec![Bytes::from_static(b"GET"), Bytes::from_static(b"foo")])
+            .send(vec!["ZADD", "scores", "1", "foo", "5", "bar", "3", "baz"])
             .await?;
-        assert_eq!(res, RedisValue::String(Bytes::from_static(b"bar")));
+        assert_eq!(res, Value::Int(3));
+
+        let res = client.send(vec!["ZRANGE", "scores", "0", "-1"]).await?;
+        assert_eq!(
+            res,
+            Value::Array(vec![
+                Value::String(Bytes::from_static(b"foo")),
+                Value::String(Bytes::from_static(b"baz")),
+                Value::String(Bytes::from_static(b"bar"))
+            ])
+        );
 
         Ok(())
     }

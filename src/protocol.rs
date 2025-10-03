@@ -28,7 +28,7 @@ impl RespCodec {
     }
 }
 
-/// Represents a parsed RESP value
+/// Represents a raw RESP value
 #[derive(Debug, PartialEq)]
 pub enum RedisValue {
     String(Bytes),
