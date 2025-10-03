@@ -189,6 +189,14 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
 
             Command::GeoAdd { key, members }
         }
+        "GEOPOS" => {
+            let key = args.pop("key")?;
+            let mut members = Vec::with_capacity(1);
+            while let Some(member) = args.pop_optional() {
+                members.push(member);
+            }
+            Command::GeoPos { key, members }
+        }
         "XADD" => {
             let key = args.pop("key")?;
             let id = args.pop("id")?;

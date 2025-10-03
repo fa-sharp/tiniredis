@@ -123,6 +123,10 @@ pub enum Command {
         key: Bytes,
         members: Vec<((f64, f64), Bytes)>,
     },
+    GeoPos {
+        key: Bytes,
+        members: Vec<Bytes>,
+    },
     XAdd {
         key: Bytes,
         id: Bytes,

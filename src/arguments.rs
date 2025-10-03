@@ -22,8 +22,8 @@ impl Arguments {
         let command = args
             .pop_front()
             .and_then(RedisValue::into_bytes)
-            .and_then(|arg_b| {
-                let command_str = std::str::from_utf8(&arg_b).ok();
+            .and_then(|arg_bytes| {
+                let command_str = std::str::from_utf8(&arg_bytes).ok();
                 command_str.map(str::to_ascii_uppercase)
             })
             .ok_or_else(|| anyhow::anyhow!("Invalid command"))?;

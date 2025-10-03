@@ -11,7 +11,10 @@ use super::{MemoryStorage, RedisDataType, RedisObject, StorageResult as Result};
 /// - HashMap of `member -> score`
 /// - BTreeSet of `{ member, score }` items ranked by score
 #[derive(Debug, Default)]
-pub struct SortedSet(HashMap<Bytes, f64>, BTreeSet<RankedItem>);
+pub struct SortedSet(
+    pub(super) HashMap<Bytes, f64>,
+    pub(super) BTreeSet<RankedItem>,
+);
 
 /// Ranked item stored in the BTreeSet
 #[derive(Debug)]
@@ -178,7 +181,7 @@ impl SortedSetStorage for MemoryStorage {
 }
 
 const NOT_SORTED_SET: Bytes = Bytes::from_static(b"Not a sorted set");
-const MALFORMED: Bytes = Bytes::from_static(b"Sorted set is malformed");
+const MALFORMED: Bytes = Bytes::from_static(b"Sorted set data is malformed");
 
 impl MemoryStorage {
     pub(super) fn get_sorted_set(&self, key: &Bytes) -> Result<Option<&SortedSet>> {
@@ -197,7 +200,12 @@ impl MemoryStorage {
 
     pub(super) fn get_sorted_set_mut(&mut self, key: &Bytes) -> Result<Option<&mut SortedSet>> {
         match self.get_mut(key) {
-            Some(RedisDataType::SortedSet(set)) => Ok(Some(set)),
+            Some(RedisDataType::SortedSet(set)) => {
+                if set.0.len() != set.1.len() {
+                    return Err(MALFORMED);
+                }
+                Ok(Some(set))
+            }
             Some(_) => Err(NOT_SORTED_SET),
             None => Ok(None),
         }

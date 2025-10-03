@@ -24,22 +24,24 @@ pub fn coord_to_score((lon, lat): (f64, f64)) -> u64 {
     let normalized_lat = (NORMALIZE * (lat - MIN_LATITUDE) / LATITUDE_RANGE) as u32;
 
     // interleave: spread both ints to u64
-    let y = spread_u32_to_u64(normalized_lon);
-    let x = spread_u32_to_u64(normalized_lat);
-    // shift y value 1 bit to the left
-    let y_shifted = y << 1;
+    let x_lon = spread_u32_to_u64(normalized_lon);
+    let y_lat = spread_u32_to_u64(normalized_lat);
+
+    // shift x value 1 bit to the left
+    let x_shifted = x_lon << 1;
+
     // combine x and y with bitwise OR
-    x | y_shifted
+    y_lat | x_shifted
 }
 
 pub fn score_to_coord(score: u64) -> (f64, f64) {
     // Extract longitude (shifted) and latitude bits
-    let y = score >> 1;
-    let x = score;
+    let x_lon = score >> 1;
+    let y_lat = score;
 
     // Compact to u32 to get grid cell
-    let grid_lon = compact_u64_to_u32(y) as f64;
-    let grid_lat = compact_u64_to_u32(x) as f64;
+    let grid_lon = compact_u64_to_u32(x_lon) as f64;
+    let grid_lat = compact_u64_to_u32(y_lat) as f64;
 
     // Calculate grid boundaries
     let grid_longitude_min = MIN_LONGITUDE + LONGITUDE_RANGE * (grid_lon / NORMALIZE);

@@ -152,6 +152,20 @@ pub fn execute_command(
         }
         Command::ZRem { key, members } => RedisValue::Int(storage.zrem(&key, members)?).into(),
         Command::GeoAdd { key, members } => RedisValue::Int(storage.geoadd(key, members)?).into(),
+        Command::GeoPos { key, members } => {
+            let member_coords = storage.geopos(&key, members)?;
+            let values = member_coords
+                .into_iter()
+                .map(|coord| match coord {
+                    Some((lon, lat)) => RedisValue::Array(vec![
+                        RedisValue::String(Bytes::from(lon.to_string())),
+                        RedisValue::String(Bytes::from(lat.to_string())),
+                    ]),
+                    None => RedisValue::NilArray,
+                })
+                .collect();
+            RedisValue::Array(values).into()
+        }
         Command::XAdd { key, id, data } => {
             let id = storage.xadd(key.clone(), id, data)?;
             notifiers.xread_notify(key); // notify blocking XREAD task
