@@ -19,7 +19,7 @@ use crate::{
 };
 
 mod executor;
-mod parser;
+pub mod parser;
 
 /// Represents a parsed Redis command
 #[derive(Debug)]
@@ -27,6 +27,9 @@ pub enum Command {
     Ping,
     DbSize,
     FlushDb,
+    Multi,
+    Exec,
+    Discard,
     Echo {
         message: Bytes,
     },
@@ -149,6 +152,8 @@ pub enum CommandResponse {
     Block(BoxFuture<'static, Result<Result<RedisValue, Bytes>, oneshot::error::RecvError>>),
     /// Subscribed to pubsub
     Subscribed(u64, mpsc::UnboundedReceiver<RedisValue>),
+    /// Enter a MULTI block
+    Transaction,
 }
 impl From<RedisValue> for CommandResponse {
     fn from(value: RedisValue) -> Self {

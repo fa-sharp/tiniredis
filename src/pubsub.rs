@@ -28,8 +28,8 @@ pub async fn subscribe_mode(
                 debug!("message received: {message:?}");
                 message
             }
-            Some(reader_res) = cxn.next() => {
-                match reader_res {
+            Some(read_result) = cxn.next() => {
+                match read_result {
                     Ok(raw_command) => match process_pubsub_command(raw_command, client_id, notifiers) {
                         Ok(_) => continue,
                         Err(err) => RedisValue::Error(Bytes::from(err.to_string())),

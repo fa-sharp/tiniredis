@@ -8,7 +8,7 @@ use tracing::warn;
 use super::{Command, CommandResponse};
 use crate::{
     notifiers::Notifiers,
-    protocol::RedisValue,
+    protocol::{constants, RedisValue},
     queues::Queues,
     storage::{
         list::ListStorage,
@@ -33,7 +33,12 @@ pub fn execute_command(
         Command::DbSize => RedisValue::Int(storage.size()).into(),
         Command::FlushDb => {
             storage.flush();
-            RedisValue::SimpleString(Bytes::from_static(b"OK")).into()
+            constants::OK.into()
+        }
+        Command::Multi => CommandResponse::Transaction,
+        Command::Exec => RedisValue::Error(Bytes::from_static(b"ERR EXEC without MULTI")).into(),
+        Command::Discard => {
+            RedisValue::Error(Bytes::from_static(b"ERR DISCARD without MULTI")).into()
         }
         Command::Get { key } => match storage.get(&key) {
             Some(val) => RedisValue::String(val).into(),
@@ -41,7 +46,7 @@ pub fn execute_command(
         },
         Command::Set { key, val, ttl } => {
             storage.set(key, val, ttl);
-            RedisValue::SimpleString(Bytes::from_static(b"OK")).into()
+            constants::OK.into()
         }
         Command::Type { key } => RedisValue::SimpleString(storage.kind(&key)).into(),
         Command::Ttl { key } => RedisValue::Int(storage.ttl(&key)).into(),
@@ -55,6 +60,7 @@ pub fn execute_command(
             RedisValue::Int(count).into()
         }
         Command::Incr { key } => RedisValue::Int(storage.incr(key)?).into(),
+
         Command::Push { key, elems, dir } => {
             let len = storage.push(key.clone(), elems, dir)?;
             notifiers.bpop_notify(key); // notify blocking POP task

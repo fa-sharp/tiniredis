@@ -4,7 +4,7 @@
 //! see [this article](https://dpbriggs.ca/blog/Implementing-A-Copyless-Redis-Protocol-in-Rust-With-Parsing-Combinators)
 
 mod base;
-mod constants;
+pub mod constants;
 mod data;
 mod decoder;
 mod encoder;

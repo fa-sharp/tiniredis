@@ -6,6 +6,7 @@ mod pubsub;
 mod queues;
 mod storage;
 mod tasks;
+mod transaction;
 
 use std::{
     env,
@@ -31,6 +32,7 @@ use crate::{
     protocol::*,
     queues::Queues,
     storage::MemoryStorage,
+    transaction::process_transaction,
 };
 
 #[tokio::main]
@@ -154,6 +156,34 @@ async fn process(
                         debug!("Entering subscribe mode");
                         pubsub::subscribe_mode(id, rx, &notifiers, &mut cxn).await;
                         continue;
+                    }
+                    Ok(CommandResponse::Transaction) => {
+                        debug!("Starting MULTI transaction");
+                        cxn.send(constants::OK).await.ok();
+                        let Some(command_queue) = process_transaction(&mut cxn).await else {
+                            debug!("Exiting MULTI transaction - no commands received");
+                            continue;
+                        };
+
+                        debug!("Executing MULTI commands: {command_queue:?}");
+                        let responses = {
+                            let mut storage_lock = storage.lock().unwrap();
+                            let mut responses = Vec::with_capacity(command_queue.len());
+                            for command in command_queue {
+                                match command.execute(storage_lock.deref_mut(), &queues, &notifiers)
+                                {
+                                    Ok(response) => match response {
+                                        CommandResponse::Value(value) => responses.push(value),
+                                        _ => responses.push(RedisValue::Error(Bytes::from_static(
+                                            b"ERR Unsupported operation in MULTI block",
+                                        ))),
+                                    },
+                                    Err(err) => responses.push(RedisValue::Error(err)),
+                                }
+                            }
+                            responses
+                        };
+                        Ok(RedisValue::Array(responses))
                     }
                     Err(err) => Err(err),
                 };

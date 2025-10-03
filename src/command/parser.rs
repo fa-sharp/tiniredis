@@ -10,6 +10,9 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
         "PING" => Command::Ping,
         "DBSIZE" => Command::DbSize,
         "FLUSHDB" => Command::FlushDb,
+        "MULTI" => Command::Multi,
+        "EXEC" => Command::Exec,
+        "DISCARD" => Command::Discard,
         "ECHO" => {
             let message = args.pop("message")?;
             Command::Echo { message }
