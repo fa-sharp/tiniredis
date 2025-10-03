@@ -70,17 +70,39 @@ impl Client {
 mod tests {
     use super::*;
 
+    const LOCALHOST: &str = "127.0.0.1:6379";
+
     #[tokio::test]
     async fn connect() -> ClientResult<()> {
-        let _ = Client::connect("127.0.0.1:6379").await?;
+        let _ = Client::connect(LOCALHOST).await?;
         Ok(())
     }
 
     #[tokio::test]
     async fn ping() -> ClientResult<()> {
-        let client = Client::connect("127.0.0.1:6379").await?;
+        let client = Client::connect(LOCALHOST).await?;
         let pong = client.send(vec![PING]).await?;
         assert_eq!(pong, RedisValue::String(Bytes::from_static(b"PONG")));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn get_and_set() -> ClientResult<()> {
+        let client = Client::connect(LOCALHOST).await?;
+        let res = client
+            .send(vec![
+                Bytes::from_static(b"SET"),
+                Bytes::from_static(b"foo"),
+                Bytes::from_static(b"bar"),
+            ])
+            .await?;
+        assert_eq!(res, RedisValue::String(Bytes::from_static(b"OK")));
+
+        let res = client
+            .send(vec![Bytes::from_static(b"GET"), Bytes::from_static(b"foo")])
+            .await?;
+        assert_eq!(res, RedisValue::String(Bytes::from_static(b"bar")));
 
         Ok(())
     }
