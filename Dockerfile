@@ -7,6 +7,7 @@ WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
+COPY client ./client
 
 ARG pkg=tinikeyval
 
