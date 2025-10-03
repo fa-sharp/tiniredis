@@ -1,0 +1,12 @@
+[package]
+name = "tinikeyval-client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytes = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+tinikeyval = { path = "../" }
+tokio = { workspace = true }
+tokio-util = { workspace = true }

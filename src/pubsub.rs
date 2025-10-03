@@ -5,23 +5,22 @@ use tokio::{
     io::{AsyncBufRead, AsyncWrite},
     sync::mpsc,
 };
-use tokio_util::codec::{FramedRead, FramedWrite};
+use tokio_util::codec::Framed;
 use tracing::debug;
 
 use crate::{
     arguments::Arguments,
     notifiers::Notifiers,
-    parser::{RedisValue, RespDecoder, RespEncoder},
+    protocol::{RedisValue, RespCodec},
 };
 
 /// 'Subscribe mode' for pubsub clients. Only responds to a subset of commands.
-#[tracing::instrument(skip(rx, notifiers, reader, writer))]
+#[tracing::instrument(skip(rx, notifiers, cxn))]
 pub async fn subscribe_mode(
     client_id: u64,
     mut rx: mpsc::UnboundedReceiver<RedisValue>,
     notifiers: &Notifiers,
-    reader: &mut FramedRead<impl AsyncBufRead + Unpin, RespDecoder>,
-    writer: &mut FramedWrite<impl AsyncWrite + Unpin, RespEncoder>,
+    cxn: &mut Framed<impl AsyncWrite + AsyncBufRead + Unpin, RespCodec>,
 ) {
     loop {
         let response = tokio::select! {
@@ -29,7 +28,7 @@ pub async fn subscribe_mode(
                 debug!("message received: {message:?}");
                 message
             }
-            Some(reader_res) = reader.next() => {
+            Some(reader_res) = cxn.next() => {
                 match reader_res {
                     Ok(raw_command) => match process_pubsub_command(raw_command, client_id, notifiers) {
                         Ok(_) => continue,
@@ -45,7 +44,7 @@ pub async fn subscribe_mode(
         };
 
         debug!("response: {response:?}");
-        if let Err(e) = writer.send(response).await {
+        if let Err(e) = cxn.send(response).await {
             debug!("exiting subscribe mode due to write error: {e}");
             break;
         }

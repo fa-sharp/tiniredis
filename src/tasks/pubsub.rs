@@ -4,7 +4,7 @@ use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, warn};
 
-use crate::{parser::RedisValue, queues::Queues};
+use crate::{protocol::RedisValue, queues::Queues};
 
 /// A pubsub client subscribed to one or more channels
 #[derive(Debug)]

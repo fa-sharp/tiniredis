@@ -6,11 +6,7 @@ use tracing::trace;
 
 use super::*;
 
-/// RESP value encoder that works as a tokio encoder
-#[derive(Debug)]
-pub struct RespEncoder;
-
-impl Encoder<RedisValue> for RespEncoder {
+impl Encoder<RedisValue> for RespCodec {
     type Error = std::io::Error;
 
     fn encode(&mut self, item: RedisValue, dst: &mut BytesMut) -> Result<(), Self::Error> {

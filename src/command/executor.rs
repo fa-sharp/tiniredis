@@ -8,7 +8,7 @@ use tracing::warn;
 use super::{Command, CommandResponse};
 use crate::{
     notifiers::Notifiers,
-    parser::RedisValue,
+    protocol::RedisValue,
     queues::Queues,
     storage::{
         list::ListStorage,

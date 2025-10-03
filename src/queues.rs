@@ -4,7 +4,7 @@ use fxhash::FxHashMap;
 use tokio::sync::mpsc;
 
 use crate::{
-    parser::RedisValue,
+    protocol::RedisValue,
     tasks::{BPopClient, PubSubClient, XReadClient},
 };
 

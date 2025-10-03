@@ -1,7 +1,7 @@
 mod arguments;
 mod command;
 mod notifiers;
-mod parser;
+mod protocol;
 mod pubsub;
 mod queues;
 mod storage;
@@ -18,18 +18,17 @@ use anyhow::Context;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use tokio::{
-    io::{BufReader, BufWriter},
+    io::{AsyncWriteExt, BufReader, BufWriter},
     net::{TcpListener, TcpStream},
     sync::{mpsc, watch},
     task::JoinSet,
 };
-use tokio_util::codec::{FramedRead, FramedWrite};
 use tracing::{debug, info, warn};
 
 use crate::{
     command::{Command, CommandResponse},
     notifiers::Notifiers,
-    parser::*,
+    protocol::*,
     queues::Queues,
     storage::MemoryStorage,
 };
@@ -135,16 +134,14 @@ async fn main_loop(
 /// Create framed reader and writer to decode and encode RESP frames, and then
 /// process and respond to incoming commands.
 async fn process(
-    mut socket: TcpStream,
+    mut tcp_stream: TcpStream,
     storage: Arc<Mutex<MemoryStorage>>,
     queues: Arc<Queues>,
     notifiers: Arc<Notifiers>,
 ) {
-    let (reader, writer) = socket.split();
-    let mut reader = FramedRead::new(BufReader::new(reader), RespDecoder);
-    let mut writer = FramedWrite::new(BufWriter::new(writer), RespEncoder);
+    let mut cxn = RespCodec::framed_io(BufWriter::new(BufReader::new(&mut tcp_stream)));
 
-    while let Some(value) = reader.next().await {
+    while let Some(value) = cxn.next().await {
         let response = match process_command(value, &storage, &queues, &notifiers).await {
             Ok(command_result) => {
                 let response_result = match command_result {
@@ -155,7 +152,7 @@ async fn process(
                     },
                     Ok(CommandResponse::Subscribed(id, rx)) => {
                         debug!("Entering subscribe mode");
-                        pubsub::subscribe_mode(id, rx, &notifiers, &mut reader, &mut writer).await;
+                        pubsub::subscribe_mode(id, rx, &notifiers, &mut cxn).await;
                         continue;
                     }
                     Err(err) => Err(err),
@@ -173,10 +170,10 @@ async fn process(
         };
 
         debug!("Response: {:?}", response);
-        let write_err = if reader.read_buffer().len() > 0 {
-            writer.feed(response).await.err() // feed response if reader has more data (e.g. client is pipelining)
+        let write_err = if cxn.read_buffer().len() > 0 {
+            cxn.feed(response).await.err() // feed response if reader has more data (e.g. client is pipelining)
         } else {
-            writer.send(response).await.err()
+            cxn.send(response).await.err()
         };
         if let Some(err) = write_err {
             warn!("Failed to send response: {err}");
@@ -184,7 +181,8 @@ async fn process(
         }
     }
 
-    writer.close().await.ok();
+    drop(cxn);
+    tcp_stream.shutdown().await.ok();
 }
 
 /// Parse, execute, and respond to the incoming command

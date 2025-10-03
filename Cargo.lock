@@ -614,6 +614,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tinikeyval-client"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "futures",
+ "thiserror",
+ "tinikeyval",
+ "tokio",
+ "tokio-util",
+]
+
+[[package]]
 name = "tokio"
 version = "1.47.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

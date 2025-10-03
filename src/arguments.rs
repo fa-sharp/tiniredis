@@ -3,7 +3,7 @@ use std::{collections::VecDeque, str::FromStr};
 use anyhow::{bail, Context};
 use bytes::Bytes;
 
-use crate::parser::RedisValue;
+use crate::protocol::RedisValue;
 
 /// The parsed command and argument strings
 pub struct Arguments {

@@ -10,13 +10,25 @@ mod decoder;
 mod encoder;
 mod errors;
 
-pub use decoder::RespDecoder;
-pub use encoder::RespEncoder;
 pub use errors::RedisParseError;
 
 use bytes::{Bytes, BytesMut};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_util::codec::Framed;
 
-/// Represents a parsed RESP value, and/or a RESP value that can be sent as a response
+/// Tokio codec that can encode and decode RESP frames
+pub struct RespCodec;
+impl RespCodec {
+    /// Create a RESP framed I/O interface from on AsyncRead + AsyncWrite resource
+    pub fn framed_io<Rw>(inner: Rw) -> Framed<Rw, RespCodec>
+    where
+        Rw: AsyncRead + AsyncWrite,
+    {
+        Framed::new(inner, RespCodec)
+    }
+}
+
+/// Represents a parsed RESP value
 #[derive(Debug, PartialEq)]
 pub enum RedisValue {
     String(Bytes),

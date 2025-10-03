@@ -7,7 +7,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::{
     arguments::Arguments,
     notifiers::Notifiers,
-    parser::RedisValue,
+    protocol::RedisValue,
     queues::Queues,
     storage::{
         list::{ListDirection, ListStorage},
