@@ -54,6 +54,7 @@ pub fn execute_command(
             }
             RedisValue::Int(count).into()
         }
+        Command::Incr { key } => RedisValue::Int(storage.incr(key)?).into(),
         Command::Push { key, elems, dir } => {
             let len = storage.push(key.clone(), elems, dir)?;
             notifiers.bpop_notify(key); // notify blocking POP task

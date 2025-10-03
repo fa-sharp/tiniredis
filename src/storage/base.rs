@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use tokio::time::Instant;
 
-use super::{MemoryStorage, RedisDataType, RedisObject};
+use super::{MemoryStorage, RedisDataType, RedisObject, StorageResult};
 
 /// Base storage interface
 pub trait Storage {
@@ -10,6 +10,7 @@ pub trait Storage {
     fn ttl(&self, key: &Bytes) -> i64;
     fn kind(&self, key: &Bytes) -> Bytes;
     fn del(&mut self, key: &Bytes) -> bool;
+    fn incr(&mut self, key: Bytes) -> StorageResult<i64>;
     fn size(&self) -> i64;
     fn flush(&mut self);
     fn cleanup_expired(&mut self) -> usize;
@@ -56,6 +57,28 @@ impl Storage for MemoryStorage {
 
     fn del(&mut self, key: &Bytes) -> bool {
         self.data.remove(key).is_some()
+    }
+
+    fn incr(&mut self, key: Bytes) -> StorageResult<i64> {
+        const INCR_ERROR: Bytes =
+            Bytes::from_static(b"ERR value is not an integer or out of range");
+
+        let val = self.get_entry_with_default(key.clone(), || {
+            RedisObject::new(RedisDataType::String(Bytes::from_static(b"0")))
+        });
+        let bytes = match val.data {
+            RedisDataType::String(ref bytes) => bytes,
+            _ => Err(INCR_ERROR)?,
+        };
+        let mut int: i64 = std::str::from_utf8(bytes)
+            .map_err(|_| INCR_ERROR)?
+            .parse()
+            .map_err(|_| INCR_ERROR)?;
+
+        int += 1;
+        self.set(key, Bytes::from(int.to_string()), None);
+
+        Ok(int)
     }
 
     fn size(&self) -> i64 {

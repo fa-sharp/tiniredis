@@ -47,6 +47,9 @@ pub enum Command {
     Del {
         keys: Vec<Bytes>,
     },
+    Incr {
+        key: Bytes,
+    },
     Push {
         key: Bytes,
         elems: VecDeque<Bytes>,

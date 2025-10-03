@@ -43,6 +43,9 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             }
             Command::Del { keys }
         }
+        "INCR" => Command::Incr {
+            key: args.pop("key")?,
+        },
         "RPUSH" | "LPUSH" => {
             let key = args.pop("key")?;
             let elem = args.pop("element")?;
