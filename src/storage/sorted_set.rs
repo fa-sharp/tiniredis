@@ -19,8 +19,8 @@ pub struct SortedSet(
 /// Ranked item stored in the BTreeSet
 #[derive(Debug)]
 pub struct RankedItem {
-    member: Bytes,
-    score: f64,
+    pub(super) member: Bytes,
+    pub(super) score: f64,
 }
 
 // Ordering by score then member

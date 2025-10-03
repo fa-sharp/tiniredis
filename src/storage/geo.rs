@@ -1,6 +1,9 @@
 use bytes::Bytes;
 
-use crate::storage::geo::geo_utils::score_to_coord;
+use crate::storage::{
+    geo::geo_utils::{coord_to_score, haversine_dist_meters, score_to_coord},
+    sorted_set::RankedItem,
+};
 
 use super::{
     sorted_set::{SortedSet, SortedSetStorage},
@@ -14,6 +17,8 @@ pub use geo_utils::{validate_lat, validate_lon};
 pub trait GeoStorage {
     fn geoadd(&mut self, key: Bytes, members: Vec<((f64, f64), Bytes)>) -> Result<i64>;
     fn geopos(&self, key: &Bytes, members: Vec<Bytes>) -> Result<Vec<Option<(f64, f64)>>>;
+    fn geodist(&self, key: &Bytes, member1: &Bytes, member2: &Bytes) -> Result<Option<f64>>;
+    fn geosearch(&self, key: &Bytes, from: (f64, f64), radius: f64) -> Result<Vec<Bytes>>;
 }
 
 impl GeoStorage for MemoryStorage {
@@ -36,5 +41,46 @@ impl GeoStorage for MemoryStorage {
             .collect();
 
         Ok(member_coords)
+    }
+
+    fn geodist(&self, key: &Bytes, member1: &Bytes, member2: &Bytes) -> Result<Option<f64>> {
+        let Some(SortedSet(hash, _)) = self.get_sorted_set(key)? else {
+            return Ok(None);
+        };
+        Ok(match (hash.get(member1), hash.get(member2)) {
+            (Some(score1), Some(score2)) => {
+                let origin = score_to_coord(*score1 as u64);
+                let dest = score_to_coord(*score2 as u64);
+                Some(haversine_dist_meters(origin, dest))
+            }
+            _ => None,
+        })
+    }
+
+    fn geosearch(&self, key: &Bytes, from_coords: (f64, f64), radius: f64) -> Result<Vec<Bytes>> {
+        let Some(SortedSet(_, ranked)) = self.get_sorted_set(key)? else {
+            return Ok(Vec::new());
+        };
+
+        // Search ranked set in both directions for locations that are within the given radius
+        let from_item = RankedItem {
+            member: Bytes::new(),
+            score: coord_to_score(from_coords) as f64,
+        };
+        let is_within_radius = |location: &&RankedItem| -> bool {
+            haversine_dist_meters(from_coords, score_to_coord(location.score as u64)) < radius
+        };
+        let search_forward = ranked
+            .range(&from_item..)
+            .take_while(is_within_radius)
+            .map(|item| item.member.clone());
+        let search_reverse = ranked
+            .range(..&from_item)
+            .rev()
+            .take_while(is_within_radius)
+            .map(|item| item.member.clone());
+        let members_within_radius = Vec::from_iter(search_forward.chain(search_reverse));
+
+        Ok(members_within_radius)
     }
 }

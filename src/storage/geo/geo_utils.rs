@@ -18,6 +18,19 @@ pub fn validate_lat(lat: f64) -> bool {
     MIN_LATITUDE <= lat && lat <= MAX_LATITUDE
 }
 
+pub fn haversine_dist_meters(origin: (f64, f64), destination: (f64, f64)) -> f64 {
+    const EARTH_RADIUS_METERS: f64 = 6372797.560856;
+
+    let lat1 = origin.1.to_radians();
+    let lat2 = destination.1.to_radians();
+    let d_lat = lat2 - lat1;
+    let d_lon = (destination.0 - origin.0).to_radians();
+
+    let a = (d_lat / 2.0).sin().powi(2) + (d_lon / 2.0).sin().powi(2) * lat1.cos() * lat2.cos();
+    let c = 2.0 * a.sqrt().asin();
+    EARTH_RADIUS_METERS * c
+}
+
 pub fn coord_to_score((lon, lat): (f64, f64)) -> u64 {
     // normalize and truncate
     let normalized_lon = (NORMALIZE * (lon - MIN_LONGITUDE) / LONGITUDE_RANGE) as u32;

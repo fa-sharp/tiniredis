@@ -127,6 +127,16 @@ pub enum Command {
         key: Bytes,
         members: Vec<Bytes>,
     },
+    GeoDist {
+        key: Bytes,
+        member1: Bytes,
+        member2: Bytes,
+    },
+    GeoSearch {
+        key: Bytes,
+        from: (f64, f64),
+        radius: f64,
+    },
     XAdd {
         key: Bytes,
         id: Bytes,

@@ -197,6 +197,28 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
             }
             Command::GeoPos { key, members }
         }
+        "GEODIST" => {
+            let key = args.pop("key")?;
+            let member1 = args.pop("member 1")?;
+            let member2 = args.pop("member 2")?;
+            Command::GeoDist {
+                key,
+                member1,
+                member2,
+            }
+        }
+        "GEOSEARCH" => {
+            let key = args.pop("key")?;
+            let _fromlonlat = args.pop("FROMLONLAT")?;
+            let from = (
+                args.pop_parse("from longitude")?,
+                args.pop_parse("from latitude")?,
+            );
+            let _byradius = args.pop("BYRADIUS")?;
+            let radius = args.pop_parse("radius")?;
+            let _unit = args.pop("radius unit")?;
+            Command::GeoSearch { key, from, radius }
+        }
         "XADD" => {
             let key = args.pop("key")?;
             let id = args.pop("id")?;

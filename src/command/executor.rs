@@ -166,6 +166,18 @@ pub fn execute_command(
                 .collect();
             RedisValue::Array(values).into()
         }
+        Command::GeoDist {
+            key,
+            member1,
+            member2,
+        } => match storage.geodist(&key, &member1, &member2)? {
+            Some(dist) => RedisValue::String(Bytes::from(dist.to_string())).into(),
+            None => RedisValue::NilString.into(),
+        },
+        Command::GeoSearch { key, from, radius } => {
+            let members = storage.geosearch(&key, from, radius)?;
+            RedisValue::Array(members.into_iter().map(RedisValue::String).collect()).into()
+        }
         Command::XAdd { key, id, data } => {
             let id = storage.xadd(key.clone(), id, data)?;
             notifiers.xread_notify(key); // notify blocking XREAD task
