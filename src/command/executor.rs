@@ -11,6 +11,7 @@ use crate::{
     protocol::{constants, RedisValue},
     queues::Queues,
     storage::{
+        geo::GeoStorage,
         list::ListStorage,
         set::SetStorage,
         sorted_set::SortedSetStorage,
@@ -23,7 +24,12 @@ use crate::{
 /// Execute the command, and format the response into [`RedisValue`] (RESP format)
 pub fn execute_command(
     command: Command,
-    storage: &mut (impl Storage + ListStorage + SetStorage + SortedSetStorage + StreamStorage),
+    storage: &mut (impl Storage
+              + ListStorage
+              + SetStorage
+              + SortedSetStorage
+              + StreamStorage
+              + GeoStorage),
     queues: &Queues,
     notifiers: &Notifiers,
 ) -> Result<CommandResponse, Bytes> {
@@ -145,6 +151,7 @@ pub fn execute_command(
             RedisValue::Array(members.into_iter().map(RedisValue::String).collect()).into()
         }
         Command::ZRem { key, members } => RedisValue::Int(storage.zrem(&key, members)?).into(),
+        Command::GeoAdd { key, members } => RedisValue::Int(storage.geoadd(key, members)?).into(),
         Command::XAdd { key, id, data } => {
             let id = storage.xadd(key.clone(), id, data)?;
             notifiers.xread_notify(key); // notify blocking XREAD task

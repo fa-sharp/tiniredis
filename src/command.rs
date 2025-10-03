@@ -10,6 +10,7 @@ use crate::{
     protocol::RedisValue,
     queues::Queues,
     storage::{
+        geo::GeoStorage,
         list::{ListDirection, ListStorage},
         set::SetStorage,
         sorted_set::SortedSetStorage,
@@ -118,6 +119,10 @@ pub enum Command {
         key: Bytes,
         members: Vec<Bytes>,
     },
+    GeoAdd {
+        key: Bytes,
+        members: Vec<((f64, f64), Bytes)>,
+    },
     XAdd {
         key: Bytes,
         id: Bytes,
@@ -172,7 +177,12 @@ impl Command {
     /// Execute the command and get the response
     pub fn execute(
         self,
-        storage: &mut (impl Storage + ListStorage + SetStorage + SortedSetStorage + StreamStorage),
+        storage: &mut (impl Storage
+                  + ListStorage
+                  + SetStorage
+                  + SortedSetStorage
+                  + StreamStorage
+                  + GeoStorage),
         queues: &Queues,
         notifiers: &Notifiers,
     ) -> Result<CommandResponse, Bytes> {

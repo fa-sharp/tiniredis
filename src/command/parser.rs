@@ -3,7 +3,13 @@ use std::collections::VecDeque;
 use anyhow::bail;
 
 use super::Command;
-use crate::{arguments::Arguments, storage::list::ListDirection};
+use crate::{
+    arguments::Arguments,
+    storage::{
+        geo::{validate_lat, validate_lon},
+        list::ListDirection,
+    },
+};
 
 pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
     let command = match args.command() {
@@ -156,6 +162,32 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
                 members.push(member);
             }
             Command::ZRem { key, members }
+        }
+        "GEOADD" => {
+            let key = args.pop("key")?;
+            let mut members = vec![(
+                (args.pop_parse("longitude")?, args.pop_parse("latitude")?),
+                args.pop("member")?,
+            )];
+            if let (Some(lon), Some(lat), Some(member)) = (
+                args.pop_parse_optional()?,
+                args.pop_parse_optional()?,
+                args.pop_optional(),
+            ) {
+                members.push(((lon, lat), member));
+            }
+
+            // Validate all coordinates
+            for ((lon, lat), _) in &members {
+                if !validate_lon(*lon) {
+                    bail!("ERR invalid longitude value: {lon}");
+                }
+                if !validate_lat(*lat) {
+                    bail!("ERR invalid latitude value: {lat}");
+                }
+            }
+
+            Command::GeoAdd { key, members }
         }
         "XADD" => {
             let key = args.pop("key")?;

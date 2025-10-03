@@ -5,7 +5,7 @@ use tokio::time::Instant;
 
 mod base;
 pub use base::*;
-
+pub mod geo;
 pub mod list;
 pub mod set;
 pub mod sorted_set;

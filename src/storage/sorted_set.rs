@@ -181,7 +181,7 @@ const NOT_SORTED_SET: Bytes = Bytes::from_static(b"Not a sorted set");
 const MALFORMED: Bytes = Bytes::from_static(b"Sorted set is malformed");
 
 impl MemoryStorage {
-    fn get_sorted_set(&self, key: &Bytes) -> Result<Option<&SortedSet>> {
+    pub(super) fn get_sorted_set(&self, key: &Bytes) -> Result<Option<&SortedSet>> {
         let Some(data) = self.get(key) else {
             return Ok(None);
         };
@@ -195,7 +195,7 @@ impl MemoryStorage {
         Ok(Some(set))
     }
 
-    fn get_sorted_set_mut(&mut self, key: &Bytes) -> Result<Option<&mut SortedSet>> {
+    pub(super) fn get_sorted_set_mut(&mut self, key: &Bytes) -> Result<Option<&mut SortedSet>> {
         match self.get_mut(key) {
             Some(RedisDataType::SortedSet(set)) => Ok(Some(set)),
             Some(_) => Err(NOT_SORTED_SET),
@@ -203,7 +203,7 @@ impl MemoryStorage {
         }
     }
 
-    fn get_sorted_set_entry(&mut self, key: Bytes) -> Result<&mut SortedSet> {
+    pub(super) fn get_sorted_set_entry(&mut self, key: Bytes) -> Result<&mut SortedSet> {
         let entry = self.get_entry_with_default(key, RedisObject::new_sorted_set);
         let RedisDataType::SortedSet(ref mut set) = entry.data else {
             return Err(NOT_SORTED_SET);
