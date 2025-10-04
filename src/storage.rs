@@ -85,11 +85,11 @@ impl RedisObject {
     }
 
     pub fn new_list() -> Self {
-        Self::new(RedisDataType::List(VecDeque::with_capacity(1)))
+        Self::new(RedisDataType::List(VecDeque::new()))
     }
 
     pub fn new_set() -> Self {
-        Self::new(RedisDataType::Set(HashSet::with_capacity(1)))
+        Self::new(RedisDataType::Set(HashSet::new()))
     }
 
     pub fn new_stream() -> Self {

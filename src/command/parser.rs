@@ -200,7 +200,7 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
         }
         "GEOPOS" => {
             let key = args.pop("key")?;
-            let mut members = Vec::with_capacity(1);
+            let mut members = Vec::new();
             while let Some(member) = args.pop_optional() {
                 members.push(member);
             }

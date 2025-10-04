@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use tinikeyval_protocol::{constants, RespValue, RespCodec};
+use tinikeyval_protocol::{constants, RespCodec, RespValue};
 use tokio::io::{AsyncBufRead, AsyncWrite};
 use tokio_util::codec::Framed;
 use tracing::debug;
@@ -15,7 +15,7 @@ use crate::{
 pub async fn process_transaction(
     cxn: &mut Framed<impl AsyncWrite + AsyncBufRead + Unpin, RespCodec>,
 ) -> Option<Vec<Command>> {
-    let mut command_queue: Vec<Command> = Vec::with_capacity(1);
+    let mut command_queue: Vec<Command> = Vec::new();
     loop {
         let raw_command = match cxn.next().await {
             Some(Ok(raw_command)) => raw_command,
