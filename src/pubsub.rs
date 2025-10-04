@@ -1,6 +1,7 @@
 use anyhow::{bail, Context};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
+use tinikeyval_protocol::{RedisValue, RespCodec};
 use tokio::{
     io::{AsyncBufRead, AsyncWrite},
     sync::mpsc,
@@ -8,11 +9,7 @@ use tokio::{
 use tokio_util::codec::Framed;
 use tracing::debug;
 
-use crate::{
-    arguments::Arguments,
-    notifiers::Notifiers,
-    protocol::{RedisValue, RespCodec},
-};
+use crate::{arguments::Arguments, notifiers::Notifiers};
 
 /// 'Subscribe mode' for pubsub clients. Only responds to a subset of commands.
 #[tracing::instrument(skip(rx, notifiers, cxn))]

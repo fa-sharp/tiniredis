@@ -2,12 +2,12 @@ use std::collections::VecDeque;
 
 use bytes::Bytes;
 use futures::future::BoxFuture;
+use tinikeyval_protocol::RedisValue;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     arguments::Arguments,
     notifiers::Notifiers,
-    protocol::RedisValue,
     queues::Queues,
     storage::{
         geo::GeoStorage,

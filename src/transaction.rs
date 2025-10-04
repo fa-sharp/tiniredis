@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
+use tinikeyval_protocol::{constants, RedisValue, RespCodec};
 use tokio::io::{AsyncBufRead, AsyncWrite};
 use tokio_util::codec::Framed;
 use tracing::debug;
@@ -7,7 +8,6 @@ use tracing::debug;
 use crate::{
     arguments::Arguments,
     command::{parser::parse_command, Command},
-    protocol::{constants, RedisValue, RespCodec},
 };
 
 /// Process a transaction entered in a `MULTI` command, and get the queued list of commands

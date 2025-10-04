@@ -4,7 +4,7 @@ use super::*;
 
 /// A parsing result, containing the position and type of the value found, as well as the next
 /// index to search from.
-type RedisParseResult = Result<Option<(RedisValueRef, usize)>, RedisParseError>;
+pub type RedisParseResult = Result<Option<(RedisValueRef, usize)>, RedisParseError>;
 
 /// Top-level parse function. Looks at the starting tag and parses the data accordingly.
 pub fn parse(buf: &BytesMut, pos: usize) -> RedisParseResult {

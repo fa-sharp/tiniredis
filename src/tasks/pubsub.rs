@@ -1,10 +1,11 @@
 use std::{collections::HashSet, sync::Arc};
 
 use bytes::Bytes;
+use tinikeyval_protocol::RedisValue;
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, warn};
 
-use crate::{protocol::RedisValue, queues::Queues};
+use crate::queues::Queues;
 
 /// A pubsub client subscribed to one or more channels
 #[derive(Debug)]

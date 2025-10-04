@@ -5,7 +5,7 @@
 
 mod base;
 pub mod constants;
-mod data;
+pub mod data;
 mod decoder;
 mod encoder;
 mod errors;
@@ -16,7 +16,7 @@ use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::Framed;
 
-/// Tokio codec that can encode and decode RESP frames
+/// Tokio codec that can both encode and decode RESP frames.
 pub struct RespCodec;
 impl RespCodec {
     /// Create a RESP framed I/O interface from on AsyncRead + AsyncWrite resource
@@ -41,7 +41,7 @@ pub enum RedisValue {
 }
 
 /// References to values within the raw RESP response bytes
-enum RedisValueRef {
+pub enum RedisValueRef {
     String(BufWindow),
     Error(BufWindow),
     Int(i64),
@@ -88,7 +88,7 @@ impl RedisValueRef {
 
 /// The indeces within a buffer (exclusive end) to get the output type
 #[derive(Debug, PartialEq)]
-struct BufWindow(usize, usize);
+pub struct BufWindow(usize, usize);
 
 impl BufWindow {
     #[inline]

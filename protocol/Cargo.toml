@@ -1,12 +1,12 @@
 [package]
-name = "tinikeyval-client"
+name = "tinikeyval-protocol"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
 bytes = { workspace = true }
-futures = { workspace = true }
+memchr = "2.7"
 thiserror = { workspace = true }
-tinikeyval-protocol = { path = "../protocol" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+tracing = { workspace = true }

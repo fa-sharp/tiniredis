@@ -604,9 +604,9 @@ dependencies = [
  "ctrlc",
  "futures",
  "fxhash",
- "memchr",
  "rand",
  "thiserror",
+ "tinikeyval-protocol",
  "tokio",
  "tokio-util",
  "tracing",
@@ -620,9 +620,21 @@ dependencies = [
  "bytes",
  "futures",
  "thiserror",
- "tinikeyval",
+ "tinikeyval-protocol",
  "tokio",
  "tokio-util",
+]
+
+[[package]]
+name = "tinikeyval-protocol"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "memchr",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
 ]
 
 [[package]]

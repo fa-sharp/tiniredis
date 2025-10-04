@@ -2,8 +2,7 @@ use std::{collections::VecDeque, str::FromStr};
 
 use anyhow::{bail, Context};
 use bytes::Bytes;
-
-use crate::protocol::RedisValue;
+use tinikeyval_protocol::RedisValue;
 
 /// The parsed command and argument strings
 pub struct Arguments {

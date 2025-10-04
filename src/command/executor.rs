@@ -2,13 +2,13 @@ use std::time::Duration;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{FutureExt, TryFutureExt};
+use tinikeyval_protocol::{constants, RedisValue};
 use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 
 use super::{Command, CommandResponse};
 use crate::{
     notifiers::Notifiers,
-    protocol::{constants, RedisValue},
     queues::Queues,
     storage::{
         geo::GeoStorage,

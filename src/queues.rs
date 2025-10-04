@@ -1,12 +1,10 @@
 use std::{collections::VecDeque, sync::Mutex};
 
 use fxhash::FxHashMap;
+use tinikeyval_protocol::RedisValue;
 use tokio::sync::mpsc;
 
-use crate::{
-    protocol::RedisValue,
-    tasks::{BPopClient, PubSubClient, XReadClient},
-};
+use crate::tasks::{BPopClient, PubSubClient, XReadClient};
 
 /// Holds the queues for blocking operations, pub/sub, etc.
 #[derive(Debug, Default)]

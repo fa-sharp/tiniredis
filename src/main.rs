@@ -1,7 +1,6 @@
 mod arguments;
 mod command;
 mod notifiers;
-mod protocol;
 mod pubsub;
 mod queues;
 mod storage;
@@ -18,6 +17,7 @@ use std::{
 use anyhow::Context;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
+use tinikeyval_protocol::{RedisParseError, RedisValue, RespCodec};
 use tokio::{
     io::{AsyncWriteExt, BufReader, BufWriter},
     net::{TcpListener, TcpStream},
@@ -29,7 +29,6 @@ use tracing::{debug, info, warn};
 use crate::{
     command::{Command, CommandResponse},
     notifiers::Notifiers,
-    protocol::*,
     queues::Queues,
     storage::MemoryStorage,
     transaction::process_transaction,
@@ -159,7 +158,7 @@ async fn process(
                     }
                     Ok(CommandResponse::Transaction) => {
                         debug!("Starting MULTI transaction");
-                        cxn.send(constants::OK).await.ok();
+                        cxn.send(tinikeyval_protocol::constants::OK).await.ok();
                         let Some(command_queue) = process_transaction(&mut cxn).await else {
                             debug!("Exiting MULTI transaction - no commands received");
                             continue;
