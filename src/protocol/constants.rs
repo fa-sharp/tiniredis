@@ -1,3 +1,5 @@
+//! Various constants for RESP and Redis requests and responses
+
 use bytes::Bytes;
 
 use crate::protocol::RedisValue;

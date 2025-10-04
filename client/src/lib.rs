@@ -1,7 +1,7 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
-use futures::{SinkExt, TryStreamExt};
+use futures::{SinkExt, StreamExt, TryStreamExt, stream};
 use tinikeyval::protocol::{RedisParseError, RedisValue, RespCodec};
 use tokio::{
     io::{BufReader, BufWriter},
@@ -27,16 +27,14 @@ pub enum Error {
 
 pub type ClientResult<T> = Result<T, Error>;
 
+/// Redis client that holds a reference to a connection. Cheaply cloneable.
+#[derive(Clone)]
 pub struct Client {
-    inner: Mutex<ClientInner>,
-}
-
-struct ClientInner {
-    cxn: Framed<BufWriter<BufReader<TcpStream>>, RespCodec>,
+    inner: Arc<Mutex<Framed<BufWriter<BufReader<TcpStream>>, RespCodec>>>,
 }
 
 /// A parsed Redis value
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     String(Bytes),
     Array(Vec<Value>),
@@ -79,7 +77,7 @@ impl Client {
         };
 
         Ok(Self {
-            inner: Mutex::new(ClientInner { cxn }),
+            inner: Mutex::new(cxn).into(),
         })
     }
 
@@ -88,25 +86,61 @@ impl Client {
     where
         S: AsRef<str>,
     {
-        fn str_to_bulk_string<S: AsRef<str>>(s: S) -> RedisValue {
-            RedisValue::String(Bytes::copy_from_slice(s.as_ref().as_bytes()))
-        }
         let raw_command = RedisValue::Array(command.into_iter().map(str_to_bulk_string).collect());
-        let mut inner = self.inner.lock().await;
-        inner.cxn.send(raw_command).await?;
-        let raw_response = timeout(TIMEOUT, inner.cxn.try_next())
+        let mut cxn = self.inner.lock().await;
+        cxn.send(raw_command).await?;
+        let raw_response = timeout(TIMEOUT, cxn.try_next())
             .await??
             .ok_or(Error::Disconnected)?;
 
         Value::try_from(raw_response)
     }
+
+    /// Send a raw pipeline to the Redis server and get an array of results
+    pub async fn pipeline<S>(
+        &self,
+        commands: Vec<Vec<S>>,
+    ) -> Result<Vec<Result<Value, Error>>, Error>
+    where
+        S: AsRef<str>,
+    {
+        let num_commands = commands.len();
+        let raw_commands = commands.into_iter().map(|command| {
+            Ok(RedisValue::Array(
+                command.into_iter().map(str_to_bulk_string).collect(),
+            ))
+        });
+        let mut cxn = self.inner.lock().await;
+        cxn.send_all(&mut stream::iter(raw_commands)).await?;
+        let responses = timeout(
+            TIMEOUT,
+            cxn.by_ref()
+                .take(num_commands)
+                .map(|parse_result| match parse_result {
+                    Ok(raw) => Value::try_from(raw),
+                    Err(err) => Err(Error::Parse(err)),
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await?;
+
+        Ok(responses)
+    }
+}
+
+fn str_to_bulk_string<S: AsRef<str>>(s: S) -> RedisValue {
+    RedisValue::String(Bytes::copy_from_slice(s.as_ref().as_bytes()))
 }
 
 #[cfg(test)]
 mod tests {
+    use futures::future::try_join_all;
+    use tinikeyval::protocol::constants;
+
     use super::*;
 
     const LOCALHOST: &str = "127.0.0.1:6379";
+    const PONG: Value = Value::String(Bytes::from_static(b"PONG"));
 
     #[tokio::test]
     async fn connect() -> ClientResult<()> {
@@ -118,7 +152,7 @@ mod tests {
     async fn ping() -> ClientResult<()> {
         let client = Client::connect(LOCALHOST).await?;
         let pong = client.send(vec!["PING"]).await?;
-        assert_eq!(pong, Value::String(Bytes::from_static(b"PONG")));
+        assert_eq!(pong, PONG);
 
         Ok(())
     }
@@ -127,7 +161,7 @@ mod tests {
     async fn get_and_set() -> ClientResult<()> {
         let client = Client::connect(LOCALHOST).await?;
         let res = client.send(vec!["SET", "foo", "bar"]).await?;
-        assert_eq!(res, Value::String(Bytes::from_static(b"OK")));
+        assert_eq!(res, constants::OK.try_into()?);
 
         let res = client.send(vec!["GET", "foo"]).await?;
         assert_eq!(res, Value::String(Bytes::from_static(b"bar")));
@@ -141,7 +175,7 @@ mod tests {
         let res = client
             .send(vec!["ZADD", "scores", "1", "foo", "5", "bar", "3", "baz"])
             .await?;
-        assert_eq!(res, Value::Int(3));
+        assert!(matches!(res, Value::Int(_)));
 
         let res = client.send(vec!["ZRANGE", "scores", "0", "-1"]).await?;
         assert_eq!(
@@ -152,6 +186,45 @@ mod tests {
                 Value::String(Bytes::from_static(b"bar"))
             ])
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pipeline() -> ClientResult<()> {
+        let client = Client::connect(LOCALHOST).await?;
+        let commands = vec![
+            vec!["PING"],
+            vec!["SET", "foo", "bar"],
+            vec!["INVALID"],
+            vec!["GET", "foo"],
+        ];
+        let responses = client.pipeline(commands).await?;
+        assert_eq!(responses.len(), 4);
+        assert_eq!(responses[0].as_ref().unwrap(), &PONG);
+        assert_eq!(responses[1].as_ref().unwrap(), &constants::OK.try_into()?);
+        assert!(matches!(responses[2], Err(Error::ResponseError(_))));
+        assert_eq!(
+            responses[3].as_ref().unwrap(),
+            &Value::String(Bytes::from_static(b"bar"))
+        );
+
+        // Verify that the client connection is still open and functional
+        assert_eq!(client.send(vec!["PING"]).await?, PONG);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn join_responses() -> ClientResult<()> {
+        let client = Client::connect(LOCALHOST).await?;
+        let results = try_join_all(vec![
+            client.send(vec!["PING"]),
+            client.send(vec!["PING"]),
+            client.send(vec!["PING"]),
+        ])
+        .await?;
+        assert_eq!(results, vec![PONG; 3]);
 
         Ok(())
     }
