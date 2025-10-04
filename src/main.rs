@@ -6,6 +6,7 @@ mod command;
 mod notifiers;
 mod pubsub;
 mod queues;
+mod rdb;
 mod server;
 mod storage;
 mod tasks;
