@@ -14,6 +14,8 @@ pub enum ClientError {
     Parse(#[from] RedisParseError),
     #[error("Error response: {0:?}")]
     ResponseError(bytes::Bytes),
+    #[error("Invalid response: {0}")]
+    Invalid(String),
     #[error("Disconnected")]
     Disconnected,
 }

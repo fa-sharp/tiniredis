@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use futures::{SinkExt, StreamExt, TryStreamExt, stream};
+use futures::{SinkExt, Stream, StreamExt, TryStreamExt, stream};
 use tinikeyval_protocol::{RespCodec, RespValue};
 use tokio::{
     io::{BufReader, BufWriter},
@@ -11,7 +11,7 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
-use crate::{ClientConfig, error::ClientError, value::Value};
+use crate::{ClientConfig, error::ClientError as Error, value::Value};
 
 /// Redis client that holds a reference to a connection. Cheaply cloneable.
 #[derive(Clone)]
@@ -22,23 +22,22 @@ pub struct Client {
 
 impl Client {
     /// Connect to the Redis server and create a client with default configuration
-    pub async fn connect(url: &str) -> Result<Self, ClientError> {
+    pub async fn connect(url: &str) -> Result<Self, Error> {
         let config = ClientConfig::default();
         Self::connect_with_config(url, config).await
     }
 
     /// Connect to the Redis server and create a client with the given configuration
-    pub async fn connect_with_config(url: &str, config: ClientConfig) -> Result<Self, ClientError> {
+    pub async fn connect_with_config(url: &str, config: ClientConfig) -> Result<Self, Error> {
         let tcp_stream = TcpStream::connect(url).await?;
         let mut cxn = RespCodec::framed_io(BufWriter::new(BufReader::new(tcp_stream)));
 
-        // Ping the server to verify connection
         const PING: Bytes = Bytes::from_static(b"PING");
         cxn.send(RespValue::Array(vec![RespValue::String(PING)]))
             .await?;
         match timeout(config.timeout, cxn.try_next()).await?? {
             Some(pong) => pong,
-            None => Err(ClientError::Disconnected)?,
+            None => Err(Error::Disconnected)?,
         };
 
         let inner = Arc::new(Mutex::new(cxn));
@@ -46,7 +45,7 @@ impl Client {
     }
 
     /// Send a raw command to the Redis server and get the response
-    pub async fn send<S>(&self, command: Vec<S>) -> Result<Value, ClientError>
+    pub async fn send<S>(&self, command: Vec<S>) -> Result<Value, Error>
     where
         S: AsRef<str>,
     {
@@ -55,7 +54,7 @@ impl Client {
         cxn.send(raw_command).await?;
         let raw_response = timeout(self.config.timeout, cxn.try_next())
             .await??
-            .ok_or(ClientError::Disconnected)?;
+            .ok_or(Error::Disconnected)?;
 
         Value::try_from(raw_response)
     }
@@ -64,7 +63,7 @@ impl Client {
     pub async fn pipeline<S>(
         &self,
         commands: Vec<Vec<S>>,
-    ) -> Result<Vec<Result<Value, ClientError>>, ClientError>
+    ) -> Result<Vec<Result<Value, Error>>, Error>
     where
         S: AsRef<str>,
     {
@@ -82,13 +81,60 @@ impl Client {
                 .take(num_commands)
                 .map(|parse_result| match parse_result {
                     Ok(raw) => Value::try_from(raw),
-                    Err(err) => Err(ClientError::Parse(err)),
+                    Err(err) => Err(Error::Parse(err)),
                 })
                 .collect::<Vec<_>>(),
         )
         .await?;
 
         Ok(responses)
+    }
+
+    /// Subscribe to the given pubsub channels. Creates a new connection to prevent
+    /// blocking the current connection, and returns a stream of `(channel, message)`.
+    pub async fn subscribe<S>(
+        &self,
+        channels: Vec<S>,
+    ) -> Result<impl Stream<Item = Result<(Bytes, Bytes), Error>>, Error>
+    where
+        S: AsRef<str>,
+    {
+        let addr = {
+            let inner = self.inner.lock().await;
+            inner.get_ref().get_ref().get_ref().peer_addr()?
+        };
+        let sub_client = Self::connect_with_config(&addr.to_string(), self.config.clone()).await?;
+
+        let mut command = vec!["SUBSCRIBE"];
+        command.extend(channels.iter().map(S::as_ref));
+        let raw_command = RespValue::Array(command.into_iter().map(str_to_bulk_string).collect());
+        sub_client.inner.lock().await.send(raw_command).await?;
+
+        let inner_stream = Arc::try_unwrap(sub_client.inner)
+            .expect("should only have one reference")
+            .into_inner()
+            .into_stream();
+        let messages_stream = inner_stream
+            .skip(channels.len()) // skip confirmation messages
+            .map(|parse_result| match parse_result {
+                Ok(raw_val) => match raw_val {
+                    RespValue::Array(mut values) => {
+                        let message = values
+                            .pop()
+                            .and_then(RespValue::into_bytes)
+                            .ok_or(Error::Invalid("No message".into()))?;
+                        let channel = values
+                            .pop()
+                            .and_then(RespValue::into_bytes)
+                            .ok_or(Error::Invalid("No channel".into()))?;
+                        Ok((channel, message))
+                    }
+                    _ => Err(Error::Invalid(format!("Expected array, got {:?}", raw_val))),
+                },
+                Err(err) => Err(Error::Parse(err)),
+            });
+
+        Ok(messages_stream)
     }
 }
 
@@ -169,7 +215,7 @@ mod tests {
         assert_eq!(responses.len(), 4);
         assert_eq!(responses[0].as_ref().unwrap(), &PONG);
         assert_eq!(responses[1].as_ref().unwrap(), &constants::OK.try_into()?);
-        assert!(matches!(responses[2], Err(ClientError::ResponseError(_))));
+        assert!(matches!(responses[2], Err(Error::ResponseError(_))));
         assert_eq!(
             responses[3].as_ref().unwrap(),
             &Value::String(Bytes::from_static(b"bar"))
@@ -191,6 +237,29 @@ mod tests {
         ])
         .await?;
         assert_eq!(results, vec![PONG; 3]);
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn subscribe() -> ClientResult<()> {
+        let client = Client::connect(LOCALHOST).await?;
+        let mut message_stream = client.subscribe(vec!["foo", "bar"]).await?;
+
+        let pub_client = client.clone();
+        tokio::spawn(async move {
+            let _ = pub_client.send(vec!["PUBLISH", "foo", "Hello"]).await;
+            let _ = pub_client.send(vec!["PUBLISH", "bar", "Goodbye"]).await;
+        });
+
+        assert_eq!(
+            message_stream.try_next().await?,
+            Some(("foo".into(), "Hello".into()))
+        );
+        assert_eq!(
+            message_stream.try_next().await?,
+            Some(("bar".into(), "Goodbye".into()))
+        );
 
         Ok(())
     }

@@ -17,6 +17,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_util::codec::Framed;
 
 /// Tokio codec that can both encode and decode RESP frames.
+#[derive(Debug)]
 pub struct RespCodec;
 impl RespCodec {
     /// Create a RESP framed I/O interface from on AsyncRead + AsyncWrite resource
