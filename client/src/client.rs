@@ -95,7 +95,7 @@ impl Client {
     pub async fn subscribe<S>(
         &self,
         channels: Vec<S>,
-    ) -> Result<impl Stream<Item = Result<(Bytes, Bytes), Error>>, Error>
+    ) -> Result<impl Stream<Item = Result<(Bytes, Bytes), Error>> + use<S>, Error>
     where
         S: AsRef<str>,
     {
@@ -246,19 +246,18 @@ mod tests {
         let client = Client::connect(LOCALHOST).await?;
         let mut message_stream = client.subscribe(vec!["foo", "bar"]).await?;
 
-        let pub_client = client.clone();
         tokio::spawn(async move {
-            let _ = pub_client.send(vec!["PUBLISH", "foo", "Hello"]).await;
-            let _ = pub_client.send(vec!["PUBLISH", "bar", "Goodbye"]).await;
+            let _ = client.send(vec!["PUBLISH", "foo", "Hello"]).await;
+            let _ = client.send(vec!["PUBLISH", "bar", "Goodbye"]).await;
         });
 
         assert_eq!(
             message_stream.try_next().await?,
-            Some(("foo".into(), "Hello".into()))
+            Some((Bytes::from("foo"), Bytes::from("Hello")))
         );
         assert_eq!(
             message_stream.try_next().await?,
-            Some(("bar".into(), "Goodbye".into()))
+            Some((Bytes::from("bar"), Bytes::from("Goodbye")))
         );
 
         Ok(())
