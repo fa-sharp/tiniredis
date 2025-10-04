@@ -105,8 +105,7 @@ impl Client {
         };
         let sub_client = Self::connect_with_config(&addr.to_string(), self.config.clone()).await?;
 
-        let mut command = vec!["SUBSCRIBE"];
-        command.extend(channels.iter().map(S::as_ref));
+        let command = std::iter::once("SUBSCRIBE").chain(channels.iter().map(S::as_ref));
         let raw_command = RespValue::Array(command.into_iter().map(str_to_bulk_string).collect());
         sub_client.inner.lock().await.send(raw_command).await?;
 
