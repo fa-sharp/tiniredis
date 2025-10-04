@@ -6,18 +6,29 @@ use bytes::{Bytes, BytesMut};
 
 /// A parsed RDB file
 #[derive(Debug)]
-struct ParsedRdb {
+pub struct Rdb {
     version: Bytes,
     metadata: Vec<(Bytes, Bytes)>,
     databases: Vec<RdbDatabase>,
 }
 
+/// Represents a database in the RDB
 #[derive(Debug, PartialEq)]
-struct RdbDatabase {
+pub struct RdbDatabase {
     idx: usize,
     db_size: usize,
     expire_size: usize,
     keys: Vec<(Bytes, Bytes, Option<u64>)>,
+}
+
+/// RDB database file parser
+pub struct RdbParser<R> {
+    /// Internal buffer
+    buf: BytesMut,
+    /// Current flag
+    flag: u8,
+    /// File reader
+    file: R,
 }
 
 const META_HEADER: u8 = 0xFA;
@@ -25,60 +36,84 @@ const DB_HEADER: u8 = 0xFE;
 const TABLE_SIZE_HEADER: u8 = 0xFB;
 const END_FILE_HEADER: u8 = 0xFF;
 
-fn parse_rdb_file(mut file: &mut impl Read) -> anyhow::Result<ParsedRdb> {
-    let mut buf = BytesMut::with_capacity(1024);
-
-    // HEADER
-    buf.resize(5, 0);
-    file.read_exact(&mut buf[..5])?; // REDIS
-    file.read_exact(&mut buf[..4])?; // rdb version
-    let rdb_version = buf.split_to(4).freeze();
-
-    // METADATA
-    let mut flag: u8 = file.read_u8()?;
-    let mut metadata = Vec::new();
-    while flag == META_HEADER {
-        let n = read_length_encoded_string(&mut file, &mut buf)?;
-        let name = buf.split_to(n).freeze();
-        let n = read_length_encoded_string(&mut file, &mut buf)?;
-        let value = buf.split_to(n).freeze();
-        metadata.push((name, value));
-
-        flag = file.read_u8()?;
+impl<R: Read> RdbParser<R> {
+    pub fn new(file: R) -> Self {
+        Self {
+            buf: BytesMut::with_capacity(1024),
+            flag: 0,
+            file,
+        }
     }
 
-    // DATABASES
-    let mut databases = Vec::new();
-    while flag == DB_HEADER {
-        // Read hash table size and expire table size
-        let idx = read_size(file.read_u8()?, &mut file)?;
-        assert_eq!(file.read_u8()?, TABLE_SIZE_HEADER, "expected table sizes");
-        let db_size = read_size(file.read_u8()?, &mut file)?;
-        let expire_size = read_size(file.read_u8()?, &mut file)?;
+    pub fn parse(mut self) -> anyhow::Result<Rdb> {
+        let version = self.parse_header()?;
+        self.flag = self.file.read_u8()?;
+
+        let mut metadata = Vec::new();
+        while self.flag == META_HEADER {
+            let (name, val) = self.parse_metadata()?;
+            metadata.push((name, val));
+        }
+
+        let mut databases = Vec::new();
+        while self.flag == DB_HEADER {
+            let db = self.parse_database()?;
+            databases.push(db);
+        }
+
+        Ok(Rdb {
+            version,
+            metadata,
+            databases,
+        })
+    }
+
+    fn parse_header(&mut self) -> anyhow::Result<Bytes> {
+        self.buf.resize(5, 0);
+        self.file.read_exact(&mut self.buf[..5])?; // REDIS
+        self.file.read_exact(&mut self.buf[..4])?; // rdb version
+
+        Ok(self.buf.split_to(4).freeze())
+    }
+
+    fn parse_metadata(&mut self) -> anyhow::Result<(Bytes, Bytes)> {
+        let n = read_length_encoded_string(&mut self.file, &mut self.buf)?;
+        let name = self.buf.split_to(n).freeze();
+        let n = read_length_encoded_string(&mut self.file, &mut self.buf)?;
+        let value = self.buf.split_to(n).freeze();
+
+        self.flag = self.file.read_u8()?;
+
+        Ok((name, value))
+    }
+
+    fn parse_database(&mut self) -> anyhow::Result<RdbDatabase> {
+        // Read database index, database size, and expire table size
+        let idx = read_size(self.file.read_u8()?, &mut self.file)?;
+        if self.file.read_u8()? != TABLE_SIZE_HEADER {
+            bail!("table size header for database {idx} not found");
+        }
+        let db_size = read_size(self.file.read_u8()?, &mut self.file)?;
+        let expire_size = read_size(self.file.read_u8()?, &mut self.file)?;
 
         // Read keys and values
         let mut keys = Vec::with_capacity(db_size);
-        while let Some((key, val, expires)) = next_key(&mut flag, &mut file, &mut buf)? {
+        while let Some((key, val, expires)) =
+            next_key(&mut self.flag, &mut self.file, &mut self.buf)?
+        {
             keys.push((key, val, expires));
         }
 
-        databases.push(RdbDatabase {
+        Ok(RdbDatabase {
             idx,
             db_size,
             expire_size,
             keys,
-        });
+        })
     }
-
-    let rdb = ParsedRdb {
-        version: rdb_version,
-        metadata,
-        databases,
-    };
-
-    Ok(rdb)
 }
 
+/// Read the next key value pair in the database. Returns `None` if at the end of the database.
 fn next_key(
     flag: &mut u8,
     reader: &mut impl Read,
@@ -86,7 +121,7 @@ fn next_key(
 ) -> anyhow::Result<Option<(Bytes, Bytes, Option<u64>)>> {
     *flag = reader.read_u8()?;
     match *flag {
-        // next database or end of file
+        // end of database
         DB_HEADER | END_FILE_HEADER => Ok(None),
         // key with u64 expiry - Unix time milliseconds
         0xFC => {
@@ -108,6 +143,7 @@ fn next_key(
     }
 }
 
+/// Read a key value pair with the given type flag
 fn read_key_value(
     flag: u8,
     reader: &mut impl Read,
@@ -123,7 +159,7 @@ fn read_key_value(
             let value = buf.split_to(n).freeze();
             Ok((key, value))
         }
-        flag => unimplemented!("unimplemented type: {flag}"),
+        flag => todo!("type not yet implemented: {flag}"),
     }
 }
 
@@ -145,7 +181,7 @@ fn read_size(first_byte: u8, reader: &mut impl Read) -> anyhow::Result<usize> {
         }
         // length is u32: next 4 bytes
         0b10 => reader.read_u32::<BigEndian>()? as usize,
-        0b11 => bail!("expected size, got an encoded integer"),
+        0b11 => bail!("expected size, got an encoded integer string"),
         _ => unreachable!(),
     };
     Ok(length)
@@ -322,7 +358,7 @@ mod test {
             117, 110, 116, 193, 140, 60, 252, 192, 128, 30, 177, 153, 1, 0, 0, 0, 3, 98, 97, 114,
             3, 98, 97, 120, 255, 15, 57, 201, 59, 63, 77, 52, 99,
         ];
-        let rdb = parse_rdb_file(&mut raw_rdb_file.reader())?;
+        let rdb = RdbParser::new(raw_rdb_file.reader()).parse()?;
         assert_eq!(rdb.version, b"0011".as_slice());
         assert_eq!(rdb.metadata.len(), 5);
         assert_eq!(
