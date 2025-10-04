@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use bytes::Bytes;
 use futures::future::BoxFuture;
-use tinikeyval_protocol::RedisValue;
+use tinikeyval_protocol::RespValue;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{
@@ -166,23 +166,23 @@ pub enum Command {
 /// The possible responses from a command
 pub enum CommandResponse {
     /// An immediate response value
-    Value(RedisValue),
+    Value(RespValue),
     /// A blocking response
-    Block(BoxFuture<'static, Result<Result<RedisValue, Bytes>, oneshot::error::RecvError>>),
+    Block(BoxFuture<'static, Result<Result<RespValue, Bytes>, oneshot::error::RecvError>>),
     /// Subscribed to pubsub
-    Subscribed(u64, mpsc::UnboundedReceiver<RedisValue>),
+    Subscribed(u64, mpsc::UnboundedReceiver<RespValue>),
     /// Enter a MULTI block
     Transaction,
 }
-impl From<RedisValue> for CommandResponse {
-    fn from(value: RedisValue) -> Self {
+impl From<RespValue> for CommandResponse {
+    fn from(value: RespValue) -> Self {
         Self::Value(value)
     }
 }
 
 impl Command {
     /// Parse the command from the raw input value
-    pub fn from_value(raw_value: RedisValue) -> anyhow::Result<Self> {
+    pub fn from_value(raw_value: RespValue) -> anyhow::Result<Self> {
         let args = Arguments::from_raw_value(raw_value)?;
         let command = parser::parse_command(args)?;
         Ok(command)

@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, sync::Mutex};
 
 use fxhash::FxHashMap;
-use tinikeyval_protocol::RedisValue;
+use tinikeyval_protocol::RespValue;
 use tokio::sync::mpsc;
 
 use crate::tasks::{BPopClient, PubSubClient, XReadClient};
@@ -41,7 +41,7 @@ impl Queues {
     }
 
     /// Add a pubsub client and get its ID
-    pub fn pubsub_add(&self, tx: mpsc::UnboundedSender<RedisValue>) -> u64 {
+    pub fn pubsub_add(&self, tx: mpsc::UnboundedSender<RespValue>) -> u64 {
         let mut pubsub_lock = self.pubsub_lock();
         let mut id: u64 = rand::random();
         while pubsub_lock.contains_key(&id) {

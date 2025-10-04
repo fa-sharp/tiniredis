@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{FutureExt, TryFutureExt};
-use tinikeyval_protocol::{constants, RedisValue};
+use tinikeyval_protocol::{constants, RespValue};
 use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 
@@ -34,28 +34,28 @@ pub fn execute_command(
     notifiers: &Notifiers,
 ) -> Result<CommandResponse, Bytes> {
     let command_response: CommandResponse = match command {
-        Command::Ping => RedisValue::SimpleString(Bytes::from_static(b"PONG")).into(),
-        Command::Echo { message } => RedisValue::String(message).into(),
-        Command::DbSize => RedisValue::Int(storage.size()).into(),
+        Command::Ping => RespValue::SimpleString(Bytes::from_static(b"PONG")).into(),
+        Command::Echo { message } => RespValue::String(message).into(),
+        Command::DbSize => RespValue::Int(storage.size()).into(),
         Command::FlushDb => {
             storage.flush();
             constants::OK.into()
         }
         Command::Multi => CommandResponse::Transaction,
-        Command::Exec => RedisValue::Error(Bytes::from_static(b"ERR EXEC without MULTI")).into(),
+        Command::Exec => RespValue::Error(Bytes::from_static(b"ERR EXEC without MULTI")).into(),
         Command::Discard => {
-            RedisValue::Error(Bytes::from_static(b"ERR DISCARD without MULTI")).into()
+            RespValue::Error(Bytes::from_static(b"ERR DISCARD without MULTI")).into()
         }
         Command::Get { key } => match storage.get(&key) {
-            Some(val) => RedisValue::String(val).into(),
-            None => RedisValue::NilString.into(),
+            Some(val) => RespValue::String(val).into(),
+            None => RespValue::NilString.into(),
         },
         Command::Set { key, val, ttl } => {
             storage.set(key, val, ttl);
             constants::OK.into()
         }
-        Command::Type { key } => RedisValue::SimpleString(storage.kind(&key)).into(),
-        Command::Ttl { key } => RedisValue::Int(storage.ttl(&key)).into(),
+        Command::Type { key } => RespValue::SimpleString(storage.kind(&key)).into(),
+        Command::Ttl { key } => RespValue::Int(storage.ttl(&key)).into(),
         Command::Del { keys } => {
             let mut count = 0;
             for key in keys {
@@ -63,24 +63,24 @@ pub fn execute_command(
                     count += 1;
                 }
             }
-            RedisValue::Int(count).into()
+            RespValue::Int(count).into()
         }
-        Command::Incr { key } => RedisValue::Int(storage.incr(key)?).into(),
+        Command::Incr { key } => RespValue::Int(storage.incr(key)?).into(),
 
         Command::Push { key, elems, dir } => {
             let len = storage.push(key.clone(), elems, dir)?;
             notifiers.bpop_notify(key); // notify blocking POP task
-            RedisValue::Int(len).into()
+            RespValue::Int(len).into()
         }
         Command::Pop { key, dir, count } => match storage.pop(&key, dir, count) {
             Some(mut elems) => {
                 if count == 1 {
-                    RedisValue::String(elems.pop().expect("should have 1 item")).into()
+                    RespValue::String(elems.pop().expect("should have 1 item")).into()
                 } else {
-                    RedisValue::Array(elems.into_iter().map(RedisValue::String).collect()).into()
+                    RespValue::Array(elems.into_iter().map(RespValue::String).collect()).into()
                 }
             }
-            None => RedisValue::NilString.into(),
+            None => RespValue::NilString.into(),
         },
         Command::BPop {
             key,
@@ -88,9 +88,9 @@ pub fn execute_command(
             timeout_millis,
         } => {
             if let Some(mut elems) = storage.pop(&key, dir, 1) {
-                RedisValue::Array(vec![
-                    RedisValue::String(key),
-                    RedisValue::String(elems.pop().expect("should have 1 item")),
+                RespValue::Array(vec![
+                    RespValue::String(key),
+                    RespValue::String(elems.pop().expect("should have 1 item")),
                 ])
                 .into()
             } else {
@@ -99,99 +99,99 @@ pub fn execute_command(
                 queues.bpop_push(BPopClient { key, dir, tx });
                 let block_response = if timeout_millis == 0 {
                     rx.map_ok(|bytes| {
-                        Ok(RedisValue::Array(vec![
-                            RedisValue::String(key_response),
-                            RedisValue::String(bytes),
+                        Ok(RespValue::Array(vec![
+                            RespValue::String(key_response),
+                            RespValue::String(bytes),
                         ]))
                     })
                     .boxed()
                 } else {
                     tokio::time::timeout(Duration::from_millis(timeout_millis), rx)
                         .map(|res| match res {
-                            Ok(Ok(bytes)) => Ok(Ok(RedisValue::Array(vec![
-                                RedisValue::String(key_response), // POP response
-                                RedisValue::String(bytes),
+                            Ok(Ok(bytes)) => Ok(Ok(RespValue::Array(vec![
+                                RespValue::String(key_response), // POP response
+                                RespValue::String(bytes),
                             ]))),
                             Ok(Err(e)) => Err(e), // Receiver disconnected
-                            Err(_) => Ok(Ok(RedisValue::NilArray)), // Timeout
+                            Err(_) => Ok(Ok(RespValue::NilArray)), // Timeout
                         })
                         .boxed()
                 };
                 CommandResponse::Block(block_response)
             }
         }
-        Command::LLen { key } => RedisValue::Int(storage.llen(&key)).into(),
+        Command::LLen { key } => RespValue::Int(storage.llen(&key)).into(),
         Command::LRange { key, start, stop } => {
             let elems = storage.lrange(&key, start, stop);
-            RedisValue::Array(elems.into_iter().map(RedisValue::String).collect()).into()
+            RespValue::Array(elems.into_iter().map(RespValue::String).collect()).into()
         }
-        Command::SAdd { key, members } => RedisValue::Int(storage.sadd(key, members)?).into(),
-        Command::SRem { key, members } => RedisValue::Int(storage.srem(&key, members)?).into(),
-        Command::SCard { key } => RedisValue::Int(storage.scard(&key)?).into(),
+        Command::SAdd { key, members } => RespValue::Int(storage.sadd(key, members)?).into(),
+        Command::SRem { key, members } => RespValue::Int(storage.srem(&key, members)?).into(),
+        Command::SCard { key } => RespValue::Int(storage.scard(&key)?).into(),
         Command::SMembers { key } => {
             let members = storage.smembers(&key)?;
-            RedisValue::Array(members.into_iter().map(RedisValue::String).collect()).into()
+            RespValue::Array(members.into_iter().map(RespValue::String).collect()).into()
         }
         Command::SIsMember { key, member } => match storage.sismember(&key, &member)? {
-            true => RedisValue::Int(1).into(),
-            false => RedisValue::Int(0).into(),
+            true => RespValue::Int(1).into(),
+            false => RespValue::Int(0).into(),
         },
-        Command::ZAdd { key, members } => RedisValue::Int(storage.zadd(key, members)?).into(),
+        Command::ZAdd { key, members } => RespValue::Int(storage.zadd(key, members)?).into(),
         Command::ZRank { key, member } => match storage.zrank(&key, member)? {
-            Some(rank) => RedisValue::Int(rank).into(),
-            None => RedisValue::NilString.into(),
+            Some(rank) => RespValue::Int(rank).into(),
+            None => RespValue::NilString.into(),
         },
         Command::ZScore { key, member } => match storage.zscore(&key, &member)? {
-            Some(score) => RedisValue::String(Bytes::from(score.to_string())).into(),
-            None => RedisValue::NilString.into(),
+            Some(score) => RespValue::String(Bytes::from(score.to_string())).into(),
+            None => RespValue::NilString.into(),
         },
-        Command::ZCard { key } => RedisValue::Int(storage.zcard(&key)?).into(),
+        Command::ZCard { key } => RespValue::Int(storage.zcard(&key)?).into(),
         Command::ZRange { key, start, stop } => {
             let members = storage.zrange(&key, start, stop)?;
-            RedisValue::Array(members.into_iter().map(RedisValue::String).collect()).into()
+            RespValue::Array(members.into_iter().map(RespValue::String).collect()).into()
         }
-        Command::ZRem { key, members } => RedisValue::Int(storage.zrem(&key, members)?).into(),
-        Command::GeoAdd { key, members } => RedisValue::Int(storage.geoadd(key, members)?).into(),
+        Command::ZRem { key, members } => RespValue::Int(storage.zrem(&key, members)?).into(),
+        Command::GeoAdd { key, members } => RespValue::Int(storage.geoadd(key, members)?).into(),
         Command::GeoPos { key, members } => {
             let member_coords = storage.geopos(&key, members)?;
             let values = member_coords
                 .into_iter()
                 .map(|coord| match coord {
-                    Some((lon, lat)) => RedisValue::Array(vec![
-                        RedisValue::String(Bytes::from(lon.to_string())),
-                        RedisValue::String(Bytes::from(lat.to_string())),
+                    Some((lon, lat)) => RespValue::Array(vec![
+                        RespValue::String(Bytes::from(lon.to_string())),
+                        RespValue::String(Bytes::from(lat.to_string())),
                     ]),
-                    None => RedisValue::NilArray,
+                    None => RespValue::NilArray,
                 })
                 .collect();
-            RedisValue::Array(values).into()
+            RespValue::Array(values).into()
         }
         Command::GeoDist {
             key,
             member1,
             member2,
         } => match storage.geodist(&key, &member1, &member2)? {
-            Some(dist) => RedisValue::String(Bytes::from(dist.to_string())).into(),
-            None => RedisValue::NilString.into(),
+            Some(dist) => RespValue::String(Bytes::from(dist.to_string())).into(),
+            None => RespValue::NilString.into(),
         },
         Command::GeoSearch { key, from, radius } => {
             let members = storage.geosearch(&key, from, radius)?;
-            RedisValue::Array(members.into_iter().map(RedisValue::String).collect()).into()
+            RespValue::Array(members.into_iter().map(RespValue::String).collect()).into()
         }
         Command::XAdd { key, id, data } => {
             let id = storage.xadd(key.clone(), id, data)?;
             notifiers.xread_notify(key); // notify blocking XREAD task
-            RedisValue::String(format_stream_id(id)).into()
+            RespValue::String(format_stream_id(id)).into()
         }
-        Command::XLen { key } => RedisValue::Int(storage.xlen(&key)).into(),
+        Command::XLen { key } => RespValue::Int(storage.xlen(&key)).into(),
         Command::XRange { key, start, end } => {
             let entries = storage.xrange(&key, &start, &end)?;
-            RedisValue::Array(entries.into_iter().map(format_stream_entry).collect()).into()
+            RespValue::Array(entries.into_iter().map(format_stream_entry).collect()).into()
         }
         Command::XRead { streams, block } => {
             let (parsed_streams, response) = storage.xread(streams.clone())?;
             if !response.is_empty() {
-                RedisValue::Array(response.into_iter().map(format_stream).collect()).into()
+                RespValue::Array(response.into_iter().map(format_stream).collect()).into()
             } else if let Some(block_millis) = block {
                 let (tx, rx) = oneshot::channel();
                 queues.xread_push(XReadClient {
@@ -205,7 +205,7 @@ pub fn execute_command(
                     rx.map_ok(|res| {
                         res.map(|streams| {
                             let resp_format = streams.into_iter().map(format_stream).collect();
-                            RedisValue::Array(resp_format)
+                            RespValue::Array(resp_format)
                         })
                     })
                     .boxed()
@@ -214,16 +214,16 @@ pub fn execute_command(
                         .map(|res| match res {
                             Ok(Ok(res)) => Ok(res.map(|streams| {
                                 let resp_format = streams.into_iter().map(format_stream).collect();
-                                RedisValue::Array(resp_format) // XREAD response
+                                RespValue::Array(resp_format) // XREAD response
                             })),
                             Ok(Err(recv_err)) => Err(recv_err), // Receiver disconnected
-                            Err(_) => Ok(Ok(RedisValue::NilArray)), // Timeout
+                            Err(_) => Ok(Ok(RespValue::NilArray)), // Timeout
                         })
                         .boxed()
                 };
                 CommandResponse::Block(block_response)
             } else {
-                RedisValue::NilArray.into()
+                RespValue::NilArray.into()
             }
         }
         Command::Subscribe { channels } => {
@@ -238,7 +238,7 @@ pub fn execute_command(
             }
         }
         Command::Publish { channel, message } => match notifiers.pubsub_publish(channel, message) {
-            Ok(rx) => CommandResponse::Block(rx.map_ok(|count| Ok(RedisValue::Int(count))).boxed()),
+            Ok(rx) => CommandResponse::Block(rx.map_ok(|count| Ok(RespValue::Int(count))).boxed()),
             Err(err) => {
                 warn!("dropped pubsub receiver: {err}");
                 Err(Bytes::from_static(b"Failed to send message"))?
@@ -258,20 +258,20 @@ fn format_stream_id((ms, seq): (u64, u64)) -> Bytes {
     bytes.freeze()
 }
 
-fn format_stream_entry((id, data): StreamEntry) -> RedisValue {
-    RedisValue::Array(vec![
-        RedisValue::String(format_stream_id(id)),
-        RedisValue::Array(
+fn format_stream_entry((id, data): StreamEntry) -> RespValue {
+    RespValue::Array(vec![
+        RespValue::String(format_stream_id(id)),
+        RespValue::Array(
             data.into_iter()
-                .flat_map(|(field, value)| [RedisValue::String(field), RedisValue::String(value)])
+                .flat_map(|(field, value)| [RespValue::String(field), RespValue::String(value)])
                 .collect(),
         ),
     ])
 }
 
-fn format_stream((key, entries): (Bytes, Vec<StreamEntry>)) -> RedisValue {
-    RedisValue::Array(vec![
-        RedisValue::String(key),
-        RedisValue::Array(entries.into_iter().map(format_stream_entry).collect()),
+fn format_stream((key, entries): (Bytes, Vec<StreamEntry>)) -> RespValue {
+    RespValue::Array(vec![
+        RespValue::String(key),
+        RespValue::Array(entries.into_iter().map(format_stream_entry).collect()),
     ])
 }

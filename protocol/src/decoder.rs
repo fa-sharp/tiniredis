@@ -6,7 +6,7 @@ use tracing::trace;
 use super::*;
 
 impl Decoder for RespCodec {
-    type Item = RedisValue;
+    type Item = RespValue;
     type Error = RedisParseError;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {

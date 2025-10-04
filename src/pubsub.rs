@@ -1,7 +1,7 @@
 use anyhow::{bail, Context};
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use tinikeyval_protocol::{RedisValue, RespCodec};
+use tinikeyval_protocol::{RespValue, RespCodec};
 use tokio::{
     io::{AsyncBufRead, AsyncWrite},
     sync::mpsc,
@@ -15,7 +15,7 @@ use crate::{arguments::Arguments, notifiers::Notifiers};
 #[tracing::instrument(skip(rx, notifiers, cxn))]
 pub async fn subscribe_mode(
     client_id: u64,
-    mut rx: mpsc::UnboundedReceiver<RedisValue>,
+    mut rx: mpsc::UnboundedReceiver<RespValue>,
     notifiers: &Notifiers,
     cxn: &mut Framed<impl AsyncWrite + AsyncBufRead + Unpin, RespCodec>,
 ) {
@@ -29,7 +29,7 @@ pub async fn subscribe_mode(
                 match read_result {
                     Ok(raw_command) => match process_pubsub_command(raw_command, client_id, notifiers) {
                         Ok(_) => continue,
-                        Err(err) => RedisValue::Error(Bytes::from(err.to_string())),
+                        Err(err) => RespValue::Error(Bytes::from(err.to_string())),
                     },
                     Err(err) => {
                         debug!("exiting subscribe mode due to read error: {err}");
@@ -50,7 +50,7 @@ pub async fn subscribe_mode(
 
 /// Process a command in 'subscribe mode'
 fn process_pubsub_command(
-    raw_command: RedisValue,
+    raw_command: RespValue,
     client_id: u64,
     notifiers: &Notifiers,
 ) -> anyhow::Result<()> {

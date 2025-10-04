@@ -30,58 +30,58 @@ impl RespCodec {
 
 /// Represents a raw RESP value
 #[derive(Debug, PartialEq)]
-pub enum RedisValue {
+pub enum RespValue {
     String(Bytes),
     SimpleString(Bytes),
     Error(Bytes),
     Int(i64),
-    Array(Vec<RedisValue>),
+    Array(Vec<RespValue>),
     NilArray,
     NilString,
 }
 
 /// References to values within the raw RESP response bytes
-pub enum RedisValueRef {
+pub enum RespValueRef {
     String(BufWindow),
     Error(BufWindow),
     Int(i64),
-    Array(Vec<RedisValueRef>),
+    Array(Vec<RespValueRef>),
     NilArray,
     NilString,
 }
 
-impl RedisValue {
+impl RespValue {
     /// If value is a string, get the bytes
     pub fn as_bytes(&self) -> Option<&Bytes> {
         match self {
-            RedisValue::String(bytes) | RedisValue::SimpleString(bytes) => Some(bytes),
+            RespValue::String(bytes) | RespValue::SimpleString(bytes) => Some(bytes),
             _ => None,
         }
     }
     /// If value is a string, turn into owned bytes
     pub fn into_bytes(self) -> Option<Bytes> {
         match self {
-            RedisValue::String(bytes) | RedisValue::SimpleString(bytes) => Some(bytes),
+            RespValue::String(bytes) | RespValue::SimpleString(bytes) => Some(bytes),
             _ => None,
         }
     }
 }
 
-impl RedisValueRef {
+impl RespValueRef {
     /// Get the underlying Redis value that this window is pointing at
-    fn extract_redis_value(self, buf: &Bytes) -> Result<RedisValue, RedisParseError> {
+    fn extract_redis_value(self, buf: &Bytes) -> Result<RespValue, RedisParseError> {
         Ok(match self {
-            RedisValueRef::String(window) => RedisValue::String(window.as_bytes(buf)),
-            RedisValueRef::Error(window) => RedisValue::Error(window.as_bytes(buf)),
-            RedisValueRef::Int(int) => RedisValue::Int(int),
-            RedisValueRef::Array(elems) => RedisValue::Array(
+            RespValueRef::String(window) => RespValue::String(window.as_bytes(buf)),
+            RespValueRef::Error(window) => RespValue::Error(window.as_bytes(buf)),
+            RespValueRef::Int(int) => RespValue::Int(int),
+            RespValueRef::Array(elems) => RespValue::Array(
                 elems
                     .into_iter()
                     .map(|value_ref| value_ref.extract_redis_value(buf))
                     .collect::<Result<_, _>>()?,
             ),
-            RedisValueRef::NilArray => RedisValue::NilArray,
-            RedisValueRef::NilString => RedisValue::NilString,
+            RespValueRef::NilArray => RespValue::NilArray,
+            RespValueRef::NilString => RespValue::NilString,
         })
     }
 }

@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Arc};
 
 use bytes::Bytes;
-use tinikeyval_protocol::RedisValue;
+use tinikeyval_protocol::RespValue;
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, warn};
 
@@ -10,11 +10,11 @@ use crate::queues::Queues;
 /// A pubsub client subscribed to one or more channels
 #[derive(Debug)]
 pub struct PubSubClient {
-    pub tx: mpsc::UnboundedSender<RedisValue>,
+    pub tx: mpsc::UnboundedSender<RespValue>,
     pub channels: HashSet<Bytes>,
 }
 impl PubSubClient {
-    pub fn new(tx: mpsc::UnboundedSender<RedisValue>) -> Self {
+    pub fn new(tx: mpsc::UnboundedSender<RespValue>) -> Self {
         Self {
             tx,
             channels: HashSet::new(),
@@ -63,9 +63,9 @@ pub async fn pubsub_task(
                     warn!("pubsub client {id} not found");
                     continue;
                 };
-                let pong = RedisValue::Array(vec![
-                    RedisValue::String(Bytes::from_static(b"pong")),
-                    RedisValue::String(Bytes::new()),
+                let pong = RespValue::Array(vec![
+                    RespValue::String(Bytes::from_static(b"pong")),
+                    RespValue::String(Bytes::new()),
                 ]);
                 client.tx.send(pong).ok();
             }
@@ -81,10 +81,10 @@ pub async fn pubsub_task(
                     if client.channels.insert(channel.clone()) {
                         num_subscribed += 1;
                     }
-                    messages.push(RedisValue::Array(vec![
-                        RedisValue::String(Bytes::from_static(b"subscribe")),
-                        RedisValue::String(channel.clone()),
-                        RedisValue::Int(num_subscribed),
+                    messages.push(RespValue::Array(vec![
+                        RespValue::String(Bytes::from_static(b"subscribe")),
+                        RespValue::String(channel.clone()),
+                        RespValue::Int(num_subscribed),
                     ]));
                 }
 
@@ -125,10 +125,10 @@ pub async fn pubsub_task(
                     .values()
                     .filter(|client| client.channels.contains(&channel) && !client.tx.is_closed())
                 {
-                    let message_val = RedisValue::Array(vec![
-                        RedisValue::String(Bytes::from_static(b"message")),
-                        RedisValue::String(channel.clone()),
-                        RedisValue::String(message.clone()),
+                    let message_val = RespValue::Array(vec![
+                        RespValue::String(Bytes::from_static(b"message")),
+                        RespValue::String(channel.clone()),
+                        RespValue::String(message.clone()),
                     ]);
                     if client.tx.send(message_val).is_ok() {
                         send_count += 1;
@@ -142,10 +142,10 @@ pub async fn pubsub_task(
     }
 }
 
-fn unsubscribe_message(channel: Bytes, num_subscribed: i64) -> RedisValue {
-    RedisValue::Array(vec![
-        RedisValue::String(Bytes::from_static(b"unsubscribe")),
-        RedisValue::String(channel),
-        RedisValue::Int(num_subscribed),
+fn unsubscribe_message(channel: Bytes, num_subscribed: i64) -> RespValue {
+    RespValue::Array(vec![
+        RespValue::String(Bytes::from_static(b"unsubscribe")),
+        RespValue::String(channel),
+        RespValue::Int(num_subscribed),
     ])
 }

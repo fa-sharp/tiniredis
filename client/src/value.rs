@@ -1,9 +1,9 @@
 use bytes::Bytes;
-use tinikeyval_protocol::RedisValue;
+use tinikeyval_protocol::RespValue;
 
 use crate::error::Error;
 
-/// A parsed Redis value
+/// A parsed value converted from RESP
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     String(Bytes),
@@ -12,19 +12,19 @@ pub enum Value {
     Nil,
 }
 
-impl TryFrom<RedisValue> for Value {
+impl TryFrom<RespValue> for Value {
     type Error = Error;
 
-    fn try_from(value: RedisValue) -> Result<Self, Self::Error> {
+    fn try_from(value: RespValue) -> Result<Self, Self::Error> {
         Ok(match value {
-            RedisValue::String(bytes) | RedisValue::SimpleString(bytes) => Value::String(bytes),
-            RedisValue::Error(bytes) => Err(Error::ResponseError(bytes))?,
-            RedisValue::Int(i) => Value::Int(i),
-            RedisValue::Array(values) => {
+            RespValue::String(bytes) | RespValue::SimpleString(bytes) => Value::String(bytes),
+            RespValue::Error(bytes) => Err(Error::ResponseError(bytes))?,
+            RespValue::Int(i) => Value::Int(i),
+            RespValue::Array(values) => {
                 let converted = values.into_iter().map(Value::try_from);
                 Value::Array(converted.collect::<Result<_, _>>()?)
             }
-            RedisValue::NilArray | RedisValue::NilString => Value::Nil,
+            RespValue::NilArray | RespValue::NilString => Value::Nil,
         })
     }
 }

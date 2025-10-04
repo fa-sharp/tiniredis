@@ -4,7 +4,7 @@ use super::*;
 
 /// A parsing result, containing the position and type of the value found, as well as the next
 /// index to search from.
-pub type RedisParseResult = Result<Option<(RedisValueRef, usize)>, RedisParseError>;
+pub type RedisParseResult = Result<Option<(RespValueRef, usize)>, RedisParseError>;
 
 /// Top-level parse function. Looks at the starting tag and parses the data accordingly.
 pub fn parse(buf: &BytesMut, pos: usize) -> RedisParseResult {
@@ -24,7 +24,7 @@ pub fn parse(buf: &BytesMut, pos: usize) -> RedisParseResult {
 
 pub fn simple_string(buf: &BytesMut, pos: usize) -> RedisParseResult {
     match base::word(buf, pos) {
-        Some((window, next_pos)) => Ok(Some((RedisValueRef::String(window), next_pos))),
+        Some((window, next_pos)) => Ok(Some((RespValueRef::String(window), next_pos))),
         None => Ok(None),
     }
 }
@@ -32,14 +32,14 @@ pub fn simple_string(buf: &BytesMut, pos: usize) -> RedisParseResult {
 pub fn bulk_string(buf: &BytesMut, pos: usize) -> RedisParseResult {
     match base::int(buf, pos)? {
         Some((bad_len, _)) if bad_len < -1 => Err(RedisParseError::BadBulkStringSize(bad_len)),
-        Some((-1, next_pos)) => Ok(Some((RedisValueRef::NilString, next_pos))),
+        Some((-1, next_pos)) => Ok(Some((RespValueRef::NilString, next_pos))),
         Some((len, next_pos)) => {
             let end_pos = next_pos + len as usize;
             if buf.len() < end_pos + constants::CRLF_LEN {
                 Ok(None)
             } else {
                 Ok(Some((
-                    RedisValueRef::String(BufWindow(next_pos, end_pos)),
+                    RespValueRef::String(BufWindow(next_pos, end_pos)),
                     end_pos + constants::CRLF_LEN,
                 )))
             }
@@ -50,7 +50,7 @@ pub fn bulk_string(buf: &BytesMut, pos: usize) -> RedisParseResult {
 
 pub fn resp_int(buf: &BytesMut, pos: usize) -> RedisParseResult {
     match base::int(buf, pos)? {
-        Some((int, next_pos)) => Ok(Some((RedisValueRef::Int(int), next_pos))),
+        Some((int, next_pos)) => Ok(Some((RespValueRef::Int(int), next_pos))),
         None => Ok(None),
     }
 }
@@ -58,7 +58,7 @@ pub fn resp_int(buf: &BytesMut, pos: usize) -> RedisParseResult {
 pub fn array(buf: &BytesMut, pos: usize) -> RedisParseResult {
     match base::int(buf, pos)? {
         Some((bad_len, _)) if bad_len < -1 => Err(RedisParseError::BadArraySize(bad_len)),
-        Some((-1, next_pos)) => Ok(Some((RedisValueRef::NilArray, next_pos))),
+        Some((-1, next_pos)) => Ok(Some((RespValueRef::NilArray, next_pos))),
         Some((len, next_pos)) => {
             let mut elems = Vec::with_capacity(len as usize);
             let mut current_pos = next_pos;
@@ -70,7 +70,7 @@ pub fn array(buf: &BytesMut, pos: usize) -> RedisParseResult {
                 current_pos = next_pos;
             }
 
-            Ok(Some((RedisValueRef::Array(elems), current_pos)))
+            Ok(Some((RespValueRef::Array(elems), current_pos)))
         }
         None => Ok(None),
     }
@@ -78,7 +78,7 @@ pub fn array(buf: &BytesMut, pos: usize) -> RedisParseResult {
 
 pub fn error(buf: &BytesMut, pos: usize) -> RedisParseResult {
     match base::word(buf, pos) {
-        Some((window, next_pos)) => Ok(Some((RedisValueRef::Error(window), next_pos))),
+        Some((window, next_pos)) => Ok(Some((RespValueRef::Error(window), next_pos))),
         None => Ok(None),
     }
 }

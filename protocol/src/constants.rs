@@ -2,7 +2,7 @@
 
 use bytes::Bytes;
 
-use crate::RedisValue;
+use crate::RespValue;
 
 pub const CRLF: &[u8; 2] = b"\r\n";
 pub const CRLF_LEN: usize = CRLF.len();
@@ -15,4 +15,4 @@ pub const INT_TAG: u8 = b':';
 pub const ARRAY_TAG: u8 = b'*';
 
 // Common responses
-pub const OK: RedisValue = RedisValue::SimpleString(Bytes::from_static(b"OK"));
+pub const OK: RespValue = RespValue::SimpleString(Bytes::from_static(b"OK"));

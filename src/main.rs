@@ -17,7 +17,7 @@ use std::{
 use anyhow::Context;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use tinikeyval_protocol::{RedisParseError, RedisValue, RespCodec};
+use tinikeyval_protocol::{RedisParseError, RespValue, RespCodec};
 use tokio::{
     io::{AsyncWriteExt, BufReader, BufWriter},
     net::{TcpListener, TcpStream},
@@ -173,28 +173,28 @@ async fn process(
                                 {
                                     Ok(response) => match response {
                                         CommandResponse::Value(value) => responses.push(value),
-                                        _ => responses.push(RedisValue::Error(Bytes::from_static(
+                                        _ => responses.push(RespValue::Error(Bytes::from_static(
                                             b"ERR Unsupported operation in MULTI block",
                                         ))),
                                     },
-                                    Err(err) => responses.push(RedisValue::Error(err)),
+                                    Err(err) => responses.push(RespValue::Error(err)),
                                 }
                             }
                             responses
                         };
-                        Ok(RedisValue::Array(responses))
+                        Ok(RespValue::Array(responses))
                     }
                     Err(err) => Err(err),
                 };
                 match response_result {
                     Ok(val) => val,
-                    Err(err) => RedisValue::Error(err),
+                    Err(err) => RespValue::Error(err),
                 }
             }
             Err(err) => {
                 let message = err.to_string();
                 info!("Error processing command: {message}");
-                RedisValue::Error(Bytes::from(message.into_bytes()))
+                RespValue::Error(Bytes::from(message.into_bytes()))
             }
         };
 
@@ -216,7 +216,7 @@ async fn process(
 
 /// Parse, execute, and respond to the incoming command
 async fn process_command(
-    value: Result<RedisValue, RedisParseError>,
+    value: Result<RespValue, RedisParseError>,
     storage: &Mutex<MemoryStorage>,
     queues: &Queues,
     notifiers: &Notifiers,

@@ -2,25 +2,25 @@ use std::{collections::VecDeque, str::FromStr};
 
 use anyhow::{bail, Context};
 use bytes::Bytes;
-use tinikeyval_protocol::RedisValue;
+use tinikeyval_protocol::RespValue;
 
 /// The parsed command and argument strings
 pub struct Arguments {
     /// Uppercase command string
     command: String,
     /// Arguments
-    args: VecDeque<RedisValue>,
+    args: VecDeque<RespValue>,
 }
 
 impl Arguments {
-    pub fn from_raw_value(raw_value: RedisValue) -> anyhow::Result<Self> {
-        let RedisValue::Array(values) = raw_value else {
+    pub fn from_raw_value(raw_value: RespValue) -> anyhow::Result<Self> {
+        let RespValue::Array(values) = raw_value else {
             bail!("No command given")
         };
         let mut args = VecDeque::from(values);
         let command = args
             .pop_front()
-            .and_then(RedisValue::into_bytes)
+            .and_then(RespValue::into_bytes)
             .and_then(|arg_bytes| {
                 let command_str = std::str::from_utf8(&arg_bytes).ok();
                 command_str.map(str::to_ascii_uppercase)
@@ -36,7 +36,7 @@ impl Arguments {
 
     /// Pop the next argument as bytes or return an error
     pub fn pop(&mut self, name: &str) -> anyhow::Result<Bytes> {
-        let Some(arg) = self.args.pop_front().and_then(RedisValue::into_bytes) else {
+        let Some(arg) = self.args.pop_front().and_then(RespValue::into_bytes) else {
             bail!("{}: {name} argument missing", self.command);
         };
         Ok(arg)
@@ -48,7 +48,7 @@ impl Arguments {
         A: FromStr,
         <A as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        let Some(arg) = self.args.pop_front().and_then(RedisValue::into_bytes) else {
+        let Some(arg) = self.args.pop_front().and_then(RespValue::into_bytes) else {
             bail!("{}: {name} argument missing", self.command);
         };
 
@@ -60,7 +60,7 @@ impl Arguments {
 
     /// Pop the next argument as bytes if it exists
     pub fn pop_optional(&mut self) -> Option<Bytes> {
-        self.args.pop_front().and_then(RedisValue::into_bytes)
+        self.args.pop_front().and_then(RespValue::into_bytes)
     }
 
     /// Pop and parse the next argument if it exists
@@ -69,7 +69,7 @@ impl Arguments {
         A: FromStr,
         <A as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        if let Some(arg) = self.args.pop_front().and_then(RedisValue::into_bytes) {
+        if let Some(arg) = self.args.pop_front().and_then(RespValue::into_bytes) {
             return Ok(Some(
                 std::str::from_utf8(&arg)
                     .context("invalid argument")?
@@ -90,7 +90,7 @@ impl Arguments {
         }) {
             if self.args.get(arg_idx + 1).is_some() {
                 self.args.remove(arg_idx);
-                return self.args.remove(arg_idx).and_then(RedisValue::into_bytes);
+                return self.args.remove(arg_idx).and_then(RespValue::into_bytes);
             }
         }
         None
@@ -110,7 +110,7 @@ impl Arguments {
         }) {
             if self.args.get(arg_idx + 1).is_some() {
                 self.args.remove(arg_idx);
-                return match self.args.remove(arg_idx).and_then(RedisValue::into_bytes) {
+                return match self.args.remove(arg_idx).and_then(RespValue::into_bytes) {
                     None => Ok(None),
                     Some(arg) => Ok(Some(
                         std::str::from_utf8(&arg)
@@ -125,7 +125,7 @@ impl Arguments {
     }
 
     /// Get remaining arguments
-    pub fn remaining(&self) -> &VecDeque<RedisValue> {
+    pub fn remaining(&self) -> &VecDeque<RespValue> {
         &self.args
     }
 }

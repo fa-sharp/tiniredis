@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt, TryStreamExt, stream};
-use tinikeyval_protocol::{RedisValue, RespCodec};
+use tinikeyval_protocol::{RespCodec, RespValue};
 use tokio::{
     io::{BufReader, BufWriter},
     net::TcpStream,
@@ -29,7 +29,7 @@ impl Client {
         let mut cxn = RespCodec::framed_io(BufWriter::new(BufReader::new(tcp_stream)));
 
         // Ping the server to verify connection
-        cxn.send(RedisValue::Array(vec![RedisValue::String(PING)]))
+        cxn.send(RespValue::Array(vec![RespValue::String(PING)]))
             .await?;
         match timeout(TIMEOUT, cxn.try_next()).await?? {
             Some(pong) => pong,
@@ -46,7 +46,7 @@ impl Client {
     where
         S: AsRef<str>,
     {
-        let raw_command = RedisValue::Array(command.into_iter().map(str_to_bulk_string).collect());
+        let raw_command = RespValue::Array(command.into_iter().map(str_to_bulk_string).collect());
         let mut cxn = self.inner.lock().await;
         cxn.send(raw_command).await?;
         let raw_response = timeout(TIMEOUT, cxn.try_next())
@@ -66,7 +66,7 @@ impl Client {
     {
         let num_commands = commands.len();
         let raw_commands = commands.into_iter().map(|command| {
-            Ok(RedisValue::Array(
+            Ok(RespValue::Array(
                 command.into_iter().map(str_to_bulk_string).collect(),
             ))
         });
@@ -88,8 +88,8 @@ impl Client {
     }
 }
 
-fn str_to_bulk_string<S: AsRef<str>>(s: S) -> RedisValue {
-    RedisValue::String(Bytes::copy_from_slice(s.as_ref().as_bytes()))
+fn str_to_bulk_string<S: AsRef<str>>(s: S) -> RespValue {
+    RespValue::String(Bytes::copy_from_slice(s.as_ref().as_bytes()))
 }
 
 #[cfg(test)]

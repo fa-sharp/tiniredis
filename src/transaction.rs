@@ -1,6 +1,6 @@
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use tinikeyval_protocol::{constants, RedisValue, RespCodec};
+use tinikeyval_protocol::{constants, RespValue, RespCodec};
 use tokio::io::{AsyncBufRead, AsyncWrite};
 use tokio_util::codec::Framed;
 use tracing::debug;
@@ -37,12 +37,12 @@ pub async fn process_transaction(
                     Ok(command) => {
                         debug!("queueing MULTI command: {command:?}");
                         command_queue.push(command);
-                        RedisValue::SimpleString(Bytes::from_static(b"QUEUED"))
+                        RespValue::SimpleString(Bytes::from_static(b"QUEUED"))
                     }
-                    Err(err) => RedisValue::Error(Bytes::from(err.to_string())),
+                    Err(err) => RespValue::Error(Bytes::from(err.to_string())),
                 },
             },
-            Err(err) => RedisValue::Error(Bytes::from(err.to_string())),
+            Err(err) => RespValue::Error(Bytes::from(err.to_string())),
         };
 
         debug!("response: {response:?}");
