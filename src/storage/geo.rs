@@ -25,7 +25,7 @@ impl GeoStorage for MemoryStorage {
     fn geoadd(&mut self, key: Bytes, members: Vec<((f64, f64), Bytes)>) -> Result<i64> {
         let members = members
             .into_iter()
-            .map(|(coord, member)| (geo_utils::coord_to_score(coord) as f64, member))
+            .map(|(coord, member)| (coord_to_score(coord) as f64, member))
             .collect();
 
         self.zadd(key, members)
@@ -61,25 +61,14 @@ impl GeoStorage for MemoryStorage {
         let Some(SortedSet(_, ranked)) = self.get_sorted_set(key)? else {
             return Ok(Vec::new());
         };
-
-        // Search ranked set in both directions for locations that are within the given radius
-        let from_item = RankedItem {
-            member: Bytes::new(),
-            score: coord_to_score(from_coords) as f64,
-        };
         let is_within_radius = |location: &&RankedItem| -> bool {
             haversine_dist_meters(from_coords, score_to_coord(location.score as u64)) < radius
         };
-        let search_forward = ranked
-            .range(&from_item..)
-            .take_while(is_within_radius)
-            .map(|item| item.member.clone());
-        let search_reverse = ranked
-            .range(..&from_item)
-            .rev()
-            .take_while(is_within_radius)
-            .map(|item| item.member.clone());
-        let members_within_radius = Vec::from_iter(search_forward.chain(search_reverse));
+        let members_within_radius = ranked
+            .iter()
+            .filter(is_within_radius)
+            .map(|item| item.member.clone())
+            .collect();
 
         Ok(members_within_radius)
     }
