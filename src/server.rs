@@ -8,12 +8,21 @@ use std::{
 };
 
 use anyhow::Context;
+use bytes::Bytes;
 use tokio::{net::TcpListener, sync::mpsc, task::JoinSet};
 use tracing::{debug, info, warn};
 
 use crate::{notifiers::Notifiers, queues::Queues, storage::MemoryStorage, tasks};
 
-pub async fn start_server() -> anyhow::Result<()> {
+/// Server config
+#[derive(Debug, Default)]
+pub struct Config {
+    pub auth: Option<Bytes>,
+    pub rdb_dir: Option<String>,
+    pub rdb_filename: Option<String>,
+}
+
+pub async fn start_server(config: Config) -> anyhow::Result<()> {
     // Setup logging
     #[cfg(debug_assertions)]
     tracing_subscriber::fmt()
@@ -25,6 +34,9 @@ pub async fn start_server() -> anyhow::Result<()> {
         .event_format(tracing_subscriber::fmt::format::json())
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+
+    // Configuration
+    let config = Arc::new(config);
 
     // Setup channels
     let (bpop_tx, bpop_rx) = mpsc::unbounded_channel();
@@ -75,7 +87,7 @@ pub async fn start_server() -> anyhow::Result<()> {
     info!("tinikeyval listening on {host}:{port}...");
 
     tokio::select! {
-        _ = main_loop(listener, storage, queues, notifiers) => {}
+        _ = main_loop(listener, config, storage, queues, notifiers) => {}
         _ = shutdown_sig.changed() => {
             info!("shutdown signal received. goodbye for now 👋");
         },
@@ -90,6 +102,7 @@ pub async fn start_server() -> anyhow::Result<()> {
 
 async fn main_loop(
     listener: TcpListener,
+    config: Arc<Config>,
     storage: Arc<Mutex<MemoryStorage>>,
     queues: Arc<Queues>,
     notifiers: Arc<Notifiers>,
@@ -100,6 +113,7 @@ async fn main_loop(
                 debug!("New connection from {addr}");
                 tokio::spawn(process::process_incoming(
                     stream,
+                    Arc::clone(&config),
                     Arc::clone(&storage),
                     Arc::clone(&queues),
                     Arc::clone(&notifiers),

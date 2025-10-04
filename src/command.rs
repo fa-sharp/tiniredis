@@ -9,6 +9,7 @@ use crate::{
     arguments::Arguments,
     notifiers::Notifiers,
     queues::Queues,
+    server::Config,
     storage::{
         geo::GeoStorage,
         list::{ListDirection, ListStorage},
@@ -25,12 +26,16 @@ pub mod parser;
 /// Represents a parsed Redis command
 #[derive(Debug)]
 pub enum Command {
+    Auth(Bytes),
     Ping,
     DbSize,
     FlushDb,
     Multi,
     Exec,
     Discard,
+    ConfigGet {
+        param: Bytes,
+    },
     Echo {
         message: Bytes,
     },
@@ -165,6 +170,8 @@ pub enum Command {
 
 /// The possible responses from a command
 pub enum CommandResponse {
+    /// An authentication request with the input password
+    Auth(Bytes),
     /// An immediate response value
     Value(RespValue),
     /// A blocking response
@@ -197,9 +204,10 @@ impl Command {
                   + SortedSetStorage
                   + StreamStorage
                   + GeoStorage),
+        config: &Config,
         queues: &Queues,
         notifiers: &Notifiers,
     ) -> Result<CommandResponse, Bytes> {
-        executor::execute_command(self, storage, queues, notifiers)
+        executor::execute_command(self, storage, config, queues, notifiers)
     }
 }

@@ -10,6 +10,7 @@ use super::{Command, CommandResponse};
 use crate::{
     notifiers::Notifiers,
     queues::Queues,
+    server::Config,
     storage::{
         geo::GeoStorage,
         list::ListStorage,
@@ -30,16 +31,33 @@ pub fn execute_command(
               + SortedSetStorage
               + StreamStorage
               + GeoStorage),
+    config: &Config,
     queues: &Queues,
     notifiers: &Notifiers,
 ) -> Result<CommandResponse, Bytes> {
     let command_response: CommandResponse = match command {
+        Command::Auth(pass) => CommandResponse::Auth(pass),
         Command::Ping => RespValue::SimpleString(Bytes::from_static(b"PONG")).into(),
         Command::Echo { message } => RespValue::String(message).into(),
         Command::DbSize => RespValue::Int(storage.size()).into(),
         Command::FlushDb => {
             storage.flush();
             constants::OK.into()
+        }
+        Command::ConfigGet { param } => {
+            let value = match param.as_ref() {
+                b"dir" => Bytes::from(config.rdb_dir.as_deref().unwrap_or_default().to_owned()),
+                b"dbfilename" => Bytes::from(
+                    config
+                        .rdb_filename
+                        .as_deref()
+                        .unwrap_or_default()
+                        .to_owned(),
+                ),
+                _ => Err(Bytes::from("ERR unrecognized parameter"))?,
+            };
+
+            RespValue::Array(vec![RespValue::String(param), RespValue::String(value)]).into()
         }
         Command::Multi => CommandResponse::Transaction,
         Command::Exec => RespValue::Error(Bytes::from_static(b"ERR EXEC without MULTI")).into(),

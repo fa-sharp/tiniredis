@@ -13,6 +13,15 @@ use crate::{
 
 pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
     let command = match args.command() {
+        "AUTH" => {
+            let pass = args.pop("password")?;
+            Command::Auth(pass)
+        }
+        "CONFIG" => {
+            let _get = args.pop("GET")?;
+            let param = args.pop("parameter")?;
+            Command::ConfigGet { param }
+        }
         "PING" => Command::Ping,
         "DBSIZE" => Command::DbSize,
         "FLUSHDB" => Command::FlushDb,
