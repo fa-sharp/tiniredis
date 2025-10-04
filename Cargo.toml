@@ -19,6 +19,7 @@ anyhow = "1.0.100"
 byteorder = "1.5.0"
 bytes = { workspace = true }
 clap = { version = "4.5.48", features = ["derive"] }
+crc64 = "2.0.0"
 ctrlc = { version = "3.5.0", features = ["termination"] }
 futures = { workspace = true }
 fxhash = "0.2.1"

@@ -4,7 +4,7 @@ use anyhow::bail;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use bytes::{Bytes, BytesMut};
 
-use super::{Rdb, RdbDatabase};
+use super::{crc_reader::Crc64Reader, Rdb, RdbDatabase};
 
 const META_FLAG: u8 = 0xFA;
 const DB_FLAG: u8 = 0xFE;
@@ -17,8 +17,8 @@ pub struct RdbParser<R> {
     buf: BytesMut,
     /// Current flag
     flag: u8,
-    /// File reader
-    file: R,
+    /// File reader with checksum calculation
+    file: Crc64Reader<R>,
 }
 
 impl<R: Read> RdbParser<R> {
@@ -26,7 +26,7 @@ impl<R: Read> RdbParser<R> {
         Self {
             buf: BytesMut::with_capacity(1024),
             flag: 0,
-            file,
+            file: Crc64Reader::new(file),
         }
     }
 
@@ -46,10 +46,16 @@ impl<R: Read> RdbParser<R> {
             databases.push(db);
         }
 
+        let checksum = self.file.checksum();
+        if checksum != self.file.read_u64::<LittleEndian>()? {
+            bail!("Invalid CRC64 checksum");
+        }
+
         Ok(Rdb {
             version,
             metadata,
             databases,
+            checksum,
         })
     }
 

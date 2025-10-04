@@ -1,5 +1,6 @@
 use bytes::Bytes;
 
+mod crc_reader;
 mod parser;
 
 /// Represents a complete RDB file
@@ -8,6 +9,7 @@ pub struct Rdb {
     version: Bytes,
     metadata: Vec<(Bytes, Bytes)>,
     databases: Vec<RdbDatabase>,
+    checksum: u64,
 }
 
 /// Represents a database in the RDB
