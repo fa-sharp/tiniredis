@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt, TryStreamExt, stream};
@@ -11,47 +11,51 @@ use tokio::{
 };
 use tokio_util::codec::Framed;
 
-use crate::{error::Error, value::Value};
+use crate::{ClientConfig, error::ClientError, value::Value};
 
 /// Redis client that holds a reference to a connection. Cheaply cloneable.
 #[derive(Clone)]
 pub struct Client {
     inner: Arc<Mutex<Framed<BufWriter<BufReader<TcpStream>>, RespCodec>>>,
+    config: ClientConfig,
 }
 
-const TIMEOUT: Duration = Duration::from_secs(6);
-const PING: Bytes = Bytes::from_static(b"PING");
-
 impl Client {
-    /// Connect to the Redis server and create a client
-    pub async fn connect(url: &str) -> Result<Self, Error> {
+    /// Connect to the Redis server and create a client with default configuration
+    pub async fn connect(url: &str) -> Result<Self, ClientError> {
+        let config = ClientConfig::default();
+        Self::connect_with_config(url, config).await
+    }
+
+    /// Connect to the Redis server and create a client with the given configuration
+    pub async fn connect_with_config(url: &str, config: ClientConfig) -> Result<Self, ClientError> {
         let tcp_stream = TcpStream::connect(url).await?;
         let mut cxn = RespCodec::framed_io(BufWriter::new(BufReader::new(tcp_stream)));
 
         // Ping the server to verify connection
+        const PING: Bytes = Bytes::from_static(b"PING");
         cxn.send(RespValue::Array(vec![RespValue::String(PING)]))
             .await?;
-        match timeout(TIMEOUT, cxn.try_next()).await?? {
+        match timeout(config.timeout, cxn.try_next()).await?? {
             Some(pong) => pong,
-            None => Err(Error::Disconnected)?,
+            None => Err(ClientError::Disconnected)?,
         };
 
-        Ok(Self {
-            inner: Mutex::new(cxn).into(),
-        })
+        let inner = Arc::new(Mutex::new(cxn));
+        Ok(Self { inner, config })
     }
 
     /// Send a raw command to the Redis server and get the response
-    pub async fn send<S>(&self, command: Vec<S>) -> Result<Value, Error>
+    pub async fn send<S>(&self, command: Vec<S>) -> Result<Value, ClientError>
     where
         S: AsRef<str>,
     {
         let raw_command = RespValue::Array(command.into_iter().map(str_to_bulk_string).collect());
         let mut cxn = self.inner.lock().await;
         cxn.send(raw_command).await?;
-        let raw_response = timeout(TIMEOUT, cxn.try_next())
+        let raw_response = timeout(self.config.timeout, cxn.try_next())
             .await??
-            .ok_or(Error::Disconnected)?;
+            .ok_or(ClientError::Disconnected)?;
 
         Value::try_from(raw_response)
     }
@@ -60,7 +64,7 @@ impl Client {
     pub async fn pipeline<S>(
         &self,
         commands: Vec<Vec<S>>,
-    ) -> Result<Vec<Result<Value, Error>>, Error>
+    ) -> Result<Vec<Result<Value, ClientError>>, ClientError>
     where
         S: AsRef<str>,
     {
@@ -73,12 +77,12 @@ impl Client {
         let mut cxn = self.inner.lock().await;
         cxn.send_all(&mut stream::iter(raw_commands)).await?;
         let responses = timeout(
-            TIMEOUT,
+            self.config.timeout,
             cxn.by_ref()
                 .take(num_commands)
                 .map(|parse_result| match parse_result {
                     Ok(raw) => Value::try_from(raw),
-                    Err(err) => Err(Error::Parse(err)),
+                    Err(err) => Err(ClientError::Parse(err)),
                 })
                 .collect::<Vec<_>>(),
         )
@@ -165,7 +169,7 @@ mod tests {
         assert_eq!(responses.len(), 4);
         assert_eq!(responses[0].as_ref().unwrap(), &PONG);
         assert_eq!(responses[1].as_ref().unwrap(), &constants::OK.try_into()?);
-        assert!(matches!(responses[2], Err(Error::ResponseError(_))));
+        assert!(matches!(responses[2], Err(ClientError::ResponseError(_))));
         assert_eq!(
             responses[3].as_ref().unwrap(),
             &Value::String(Bytes::from_static(b"bar"))

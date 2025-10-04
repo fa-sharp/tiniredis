@@ -1,11 +1,11 @@
 use tinikeyval_protocol::RedisParseError;
 
 /// Result type for the Redis client
-pub type ClientResult<T> = Result<T, Error>;
+pub type ClientResult<T> = Result<T, ClientError>;
 
 /// Possible errors when communicating with the Redis server
 #[derive(Debug, thiserror::Error)]
-pub enum Error {
+pub enum ClientError {
     #[error("Timeout")]
     Timeout(#[from] tokio::time::error::Elapsed),
     #[error("Connection: {0}")]
