@@ -10,7 +10,7 @@ use tokio::{
     io::{AsyncWriteExt, BufReader, BufWriter},
     net::TcpStream,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::{
     command::{Command, CommandResponse},
@@ -110,7 +110,7 @@ pub async fn process_incoming(
             cxn.send(response).await.err()
         };
         if let Some(err) = write_err {
-            warn!("Failed to send response: {err}");
+            info!("Connection dropped due to write error: {err}");
             break;
         }
     }

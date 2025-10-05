@@ -3,16 +3,26 @@ mod shutdown;
 
 use std::{
     env,
+    path::PathBuf,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use anyhow::Context;
 use bytes::Bytes;
-use tokio::{net::TcpListener, sync::mpsc, task::JoinSet};
+use tokio::{
+    net::TcpListener,
+    sync::mpsc,
+    task::{spawn_blocking, JoinSet},
+};
 use tracing::{debug, info, warn};
 
-use crate::{notifiers::Notifiers, queues::Queues, storage::MemoryStorage, tasks};
+use crate::{
+    notifiers::Notifiers,
+    queues::Queues,
+    storage::{rdb, MemoryStorage, Storage},
+    tasks,
+};
 
 /// Server config
 #[derive(Debug, Default)]
@@ -20,8 +30,10 @@ pub struct Config {
     pub auth: Option<Bytes>,
     pub rdb_dir: Option<String>,
     pub rdb_filename: Option<String>,
+    pub rdb_path: PathBuf,
 }
 
+/// Setup the server and start listening for connections
 pub async fn start_server(config: Config) -> anyhow::Result<()> {
     // Setup logging
     #[cfg(debug_assertions)]
@@ -38,13 +50,26 @@ pub async fn start_server(config: Config) -> anyhow::Result<()> {
     // Configuration
     let config = Arc::new(config);
 
+    // Setup and load storage
+    let rdb_file_path = config.rdb_path.to_owned();
+    let storage = match spawn_blocking(move || rdb::load_rdb_file(&rdb_file_path)).await {
+        Ok(Ok(storage)) => {
+            info!("Loaded database from file: {} keys", storage.size());
+            Arc::new(Mutex::new(storage))
+        }
+        Ok(Err(err)) => {
+            warn!("Failed loading database file: {err} ({})", err.root_cause());
+            Arc::default()
+        }
+        Err(err) => panic!("Database read task panicked: {err}"),
+    };
+
     // Setup channels
     let (bpop_tx, bpop_rx) = mpsc::unbounded_channel();
     let (xread_tx, xread_rx) = mpsc::unbounded_channel();
     let (pubsub_tx, pubsub_rx) = mpsc::unbounded_channel();
 
-    // Setup storage, queues, and notifiers
-    let storage: Arc<Mutex<MemoryStorage>> = Arc::default();
+    // Setup queues and notifiers
     let queues: Arc<Queues> = Arc::default();
     let notifiers: Arc<Notifiers> = Arc::new(Notifiers {
         bpop: bpop_tx,

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use bytes::Bytes;
 use clap::Parser;
 
@@ -6,7 +8,6 @@ mod command;
 mod notifiers;
 mod pubsub;
 mod queues;
-mod rdb;
 mod server;
 mod storage;
 mod tasks;
@@ -16,13 +17,13 @@ mod transaction;
 #[command(version)]
 struct Args {
     /// Require a password to authenticate before sending commands
-    #[arg(long("requirepass"))]
-    pass: Option<Bytes>,
+    #[arg(long, name("password"))]
+    requirepass: Option<Bytes>,
     /// The path to the directory where the RDB file is stored
-    #[arg(long("dir"))]
-    dir_path: Option<String>,
+    #[arg(long, name("path"))]
+    dir: Option<String>,
     /// The name of the RDB file
-    #[arg(long("dbfilename"))]
+    #[arg(long, name("filename"))]
     dbfilename: Option<String>,
 }
 
@@ -30,8 +31,10 @@ struct Args {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = server::Config {
-        auth: args.pass,
-        rdb_dir: args.dir_path,
+        auth: args.requirepass,
+        rdb_path: Path::new(args.dir.as_deref().unwrap_or("."))
+            .join(args.dbfilename.as_deref().unwrap_or("dump.rdb")),
+        rdb_dir: args.dir,
         rdb_filename: args.dbfilename,
     };
 
