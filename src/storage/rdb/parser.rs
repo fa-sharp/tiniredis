@@ -4,12 +4,7 @@ use anyhow::bail;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use bytes::{Bytes, BytesMut};
 
-use super::{crc_reader::Crc64Reader, Rdb, RdbDatabase};
-
-const META_FLAG: u8 = 0xFA;
-const DB_FLAG: u8 = 0xFE;
-const DB_SIZE_FLAG: u8 = 0xFB;
-const END_FILE_FLAG: u8 = 0xFF;
+use super::{constants, crc::Crc64Reader, Rdb, RdbDatabase};
 
 /// RDB database file parser
 pub struct RdbParser<R> {
@@ -30,18 +25,19 @@ impl<R: Read> RdbParser<R> {
         }
     }
 
+    /// Parse the RDB file from the reader, verifying the checksum
     pub fn parse(mut self) -> anyhow::Result<Rdb> {
         let version = self.parse_header()?;
         self.flag = self.file.read_u8()?;
 
         let mut metadata = Vec::new();
-        while self.flag == META_FLAG {
+        while self.flag == constants::META_FLAG {
             let (name, val) = self.parse_metadata()?;
             metadata.push((name, val));
         }
 
         let mut databases = Vec::new();
-        while self.flag == DB_FLAG {
+        while self.flag == constants::DB_FLAG {
             let db = self.parse_database()?;
             databases.push(db);
         }
@@ -81,7 +77,7 @@ impl<R: Read> RdbParser<R> {
     fn parse_database(&mut self) -> anyhow::Result<RdbDatabase> {
         // Read database index, database size, and expire table size
         let idx = read_size(self.file.read_u8()?, &mut self.file)?;
-        if self.file.read_u8()? != DB_SIZE_FLAG {
+        if self.file.read_u8()? != constants::DB_SIZE_FLAG {
             bail!("table size header for database {idx} not found");
         }
         let db_size = read_size(self.file.read_u8()?, &mut self.file)?;
@@ -113,15 +109,15 @@ fn next_key(
     *flag = reader.read_u8()?;
     match *flag {
         // end of database
-        DB_FLAG | END_FILE_FLAG => Ok(None),
+        constants::DB_FLAG | constants::END_FILE_FLAG => Ok(None),
         // key with u64 expiry - Unix time milliseconds
-        0xFC => {
+        constants::EXPIRY_U64_FLAG => {
             let expires = reader.read_u64::<LittleEndian>()?;
             let (key, value) = read_key_value(reader.read_u8()?, reader, buf)?;
             Ok(Some((key, value, Some(expires))))
         }
         // key with u32 expiry - Unix time seconds
-        0xFD => {
+        constants::EXPIRY_U32_FLAG => {
             let expires = (reader.read_u32::<LittleEndian>()? * 1000).into();
             let (key, value) = read_key_value(reader.read_u8()?, reader, buf)?;
             Ok(Some((key, value, Some(expires))))
@@ -146,23 +142,21 @@ fn read_key_value(
 
     // check the type flag, and then read the value
     match flag {
-        // string type
-        0x00 => {
+        constants::TYPE_STRING_FLAG => {
             let n = read_length_encoded_string(reader, buf)?;
             let value = buf.split_to(n).freeze();
             Ok((key, value))
         }
-        // list and set type
-        0x01 | 0x02 => {
+        constants::TYPE_LIST_FLAG | constants::TYPE_SET_FLAG => {
             let list_size = read_size(reader.read_u8()?, reader)?;
             let mut members = Vec::new();
             for _ in 0..list_size {
                 let n = read_length_encoded_string(reader, buf)?;
                 members.push(buf.split_to(n).freeze());
             }
-            todo!()
+            bail!("unimplemented data type {flag:#X} in rdb file")
         }
-        flag => unimplemented!("unknown data type {flag:#X} in rdb file"),
+        flag => bail!("unimplemented data type {flag:#X} in rdb file"),
     }
 }
 
@@ -207,11 +201,11 @@ fn read_length_encoded_string(reader: &mut impl Read, buf: &mut BytesMut) -> any
         0b11 => {
             let val = match first_byte {
                 // value is an 8-bit integer
-                0xC0 => reader.read_i8()?.to_string(),
+                constants::STRING_I8_FLAG => reader.read_i8()?.to_string(),
                 // value is a little-endian 16-bit integer
-                0xC1 => reader.read_i16::<LittleEndian>()?.to_string(),
+                constants::STRING_I16_FLAG => reader.read_i16::<LittleEndian>()?.to_string(),
                 // value is a little-endian 32-bit integer
-                0xC2 => reader.read_i32::<LittleEndian>()?.to_string(),
+                constants::STRING_I32_FLAG => reader.read_i32::<LittleEndian>()?.to_string(),
                 _ => unimplemented!("LZF compression not implemented"),
             };
             buf.resize(val.len(), 0);
@@ -224,7 +218,7 @@ fn read_length_encoded_string(reader: &mut impl Read, buf: &mut BytesMut) -> any
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use bytes::Buf;
 
     use super::*;

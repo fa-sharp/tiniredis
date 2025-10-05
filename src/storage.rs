@@ -112,4 +112,8 @@ impl RedisObject {
             true
         }
     }
+
+    fn is_string(&self) -> bool {
+        matches!(self.data, RedisDataType::String(_))
+    }
 }

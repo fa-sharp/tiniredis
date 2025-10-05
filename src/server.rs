@@ -102,6 +102,11 @@ pub async fn start_server(config: Config) -> anyhow::Result<()> {
         Arc::clone(&queues),
         shutdown_sig.clone(),
     ));
+    all_tasks.spawn(tasks::persist_task(
+        Arc::clone(&storage),
+        config.rdb_path.clone(),
+        shutdown_sig.clone(),
+    ));
 
     // Start server
     let host_var = env::var("HOST");
@@ -114,7 +119,7 @@ pub async fn start_server(config: Config) -> anyhow::Result<()> {
     tokio::select! {
         _ = main_loop(listener, config, storage, queues, notifiers) => {}
         _ = shutdown_sig.changed() => {
-            info!("shutdown signal received. goodbye for now 👋");
+            info!("shutdown signal received. shutting down...");
         },
     }
 
@@ -122,6 +127,7 @@ pub async fn start_server(config: Config) -> anyhow::Result<()> {
     tokio::time::timeout(Duration::from_secs(5), all_tasks.join_all())
         .await
         .context("some task(s) didn't shut down within grace period")?;
+    info!("server shut down. goodbye for now 👋");
     Ok(())
 }
 

@@ -2,18 +2,22 @@ use std::{
     fs::File,
     io::BufReader,
     path::Path,
+    sync::Mutex,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Context;
 use bytes::Bytes;
+use tempfile::NamedTempFile;
 use tokio::time::Instant;
 use tracing::debug;
 
 use crate::storage::{MemoryStorage, RedisDataType, RedisObject};
 
-mod crc_reader;
+mod constants;
+mod crc;
 mod parser;
+mod writer;
 
 /// Represents a complete RDB file
 #[derive(Debug)]
@@ -80,4 +84,28 @@ pub fn load_rdb_file(file_path: &Path) -> anyhow::Result<MemoryStorage> {
     }
 
     Ok(storage)
+}
+
+/// Save a snapshot of the in-memory database to disk in an RDB file.
+/// This is a synchronous blocking operation - use `spawn_blocking` when calling from async code.
+pub fn save_rdb_file(storage: &Mutex<MemoryStorage>, file_path: &Path) -> anyhow::Result<()> {
+    let mut temp_file = NamedTempFile::new().context("create temp file")?;
+    let rdb_writer = writer::RdbWriter::new(&mut temp_file);
+    let start_time = Instant::now();
+    {
+        let storage_lock = storage.lock().unwrap();
+        let current_keys = storage_lock
+            .data
+            .iter()
+            .filter(|(_, obj)| obj.is_current())
+            .collect();
+        rdb_writer.dump(current_keys).context("write RDB file")?;
+    }
+    temp_file.persist(file_path).context("save RDB file")?;
+
+    debug!(
+        "Saved database snapshot to {file_path:?} in {} ms",
+        Instant::now().duration_since(start_time).as_micros() as f64 / 1000.0
+    );
+    Ok(())
 }
