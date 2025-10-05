@@ -30,6 +30,7 @@ impl<W: Write> RdbWriter<W> {
         self.write_metadata()?;
         self.write_database(0, keys)?;
         self.write_end()?;
+        self.file.flush()?;
 
         Ok(())
     }
