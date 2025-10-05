@@ -54,7 +54,7 @@ pub async fn start_server(config: Config) -> anyhow::Result<()> {
     let rdb_file_path = config.rdb_path.to_owned();
     let storage = match spawn_blocking(move || rdb::load_rdb_file(&rdb_file_path)).await {
         Ok(Ok(storage)) => {
-            info!("Loaded database from file: {} keys", storage.size());
+            info!("Database loaded from file, keys loaded: {}", storage.size());
             Arc::new(Mutex::new(storage))
         }
         Ok(Err(err)) => {
