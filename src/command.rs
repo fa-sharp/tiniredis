@@ -59,6 +59,9 @@ pub enum Command {
     Incr {
         key: Bytes,
     },
+    Keys {
+        _pattern: Bytes,
+    },
     Push {
         key: Bytes,
         elems: VecDeque<Bytes>,

@@ -64,6 +64,13 @@ pub fn parse_command(mut args: Arguments) -> anyhow::Result<Command> {
         "INCR" => Command::Incr {
             key: args.pop("key")?,
         },
+        "KEYS" => {
+            let _pattern = args.pop("pattern")?;
+            if _pattern.as_ref() != b"*" {
+                bail!("ERR only * pattern supported");
+            }
+            Command::Keys { _pattern }
+        }
         "RPUSH" | "LPUSH" => {
             let key = args.pop("key")?;
             let elem = args.pop("element")?;

@@ -46,14 +46,8 @@ pub fn execute_command(
         }
         Command::ConfigGet { param } => {
             let value = match param.as_ref() {
-                b"dir" => Bytes::from(config.rdb_dir.as_deref().unwrap_or_default().to_owned()),
-                b"dbfilename" => Bytes::from(
-                    config
-                        .rdb_filename
-                        .as_deref()
-                        .unwrap_or_default()
-                        .to_owned(),
-                ),
+                b"dir" => Bytes::from(config.rdb_dir.clone().unwrap_or_default()),
+                b"dbfilename" => Bytes::from(config.rdb_filename.clone().unwrap_or_default()),
                 _ => Err(Bytes::from("ERR unrecognized parameter"))?,
             };
 
@@ -84,7 +78,9 @@ pub fn execute_command(
             RespValue::Int(count).into()
         }
         Command::Incr { key } => RespValue::Int(storage.incr(key)?).into(),
-
+        Command::Keys { .. } => {
+            RespValue::Array(storage.keys().into_iter().map(RespValue::String).collect()).into()
+        }
         Command::Push { key, elems, dir } => {
             let len = storage.push(key.clone(), elems, dir)?;
             notifiers.bpop_notify(key); // notify blocking POP task

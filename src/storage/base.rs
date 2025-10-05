@@ -12,6 +12,7 @@ pub trait Storage {
     fn del(&mut self, key: &Bytes) -> bool;
     fn incr(&mut self, key: Bytes) -> StorageResult<i64>;
     fn size(&self) -> i64;
+    fn keys(&self) -> Vec<Bytes>;
     fn flush(&mut self);
     fn cleanup_expired(&mut self) -> usize;
 }
@@ -84,6 +85,10 @@ impl Storage for MemoryStorage {
     fn size(&self) -> i64 {
         let count = self.data.values().filter(|o| o.is_current()).count();
         count.try_into().unwrap_or_default()
+    }
+
+    fn keys(&self) -> Vec<Bytes> {
+        self.data.keys().cloned().collect()
     }
 
     fn flush(&mut self) {

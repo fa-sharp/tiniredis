@@ -140,17 +140,29 @@ fn read_key_value(
     reader: &mut impl Read,
     buf: &mut BytesMut,
 ) -> anyhow::Result<(Bytes, Bytes)> {
+    // read the key
+    let n = read_length_encoded_string(reader, buf)?;
+    let key = buf.split_to(n).freeze();
+
     // check the type flag, and then read the value
     match flag {
         // string type
         0x00 => {
             let n = read_length_encoded_string(reader, buf)?;
-            let key = buf.split_to(n).freeze();
-            let n = read_length_encoded_string(reader, buf)?;
             let value = buf.split_to(n).freeze();
             Ok((key, value))
         }
-        flag => todo!("type not yet implemented: {flag}"),
+        // list and set type
+        0x01 | 0x02 => {
+            let list_size = read_size(reader.read_u8()?, reader)?;
+            let mut members = Vec::new();
+            for _ in 0..list_size {
+                let n = read_length_encoded_string(reader, buf)?;
+                members.push(buf.split_to(n).freeze());
+            }
+            todo!()
+        }
+        flag => unimplemented!("unknown data type {flag:#X} in rdb file"),
     }
 }
 
