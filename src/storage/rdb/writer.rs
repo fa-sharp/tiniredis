@@ -147,7 +147,7 @@ fn write_size(writer: &mut impl Write, len: usize) -> io::Result<()> {
     match len {
         len if len <= 0x3F => writer.write_u8(len as u8)?,
         len if len <= 0x3FFF => write_u16_size(writer, len as u16)?,
-        len if len <= 0xFFFFFFFF => write_u32_size(writer, len as u32)?,
+        len if len <= u32::MAX as usize => write_u32_size(writer, len as u32)?,
         invalid_len => Err(io::Error::other(format!("Length {invalid_len} too long")))?,
     }
     Ok(())
@@ -163,7 +163,7 @@ fn write_u16_size(writer: &mut impl Write, len: u16) -> io::Result<()> {
     Ok(())
 }
 
-/// For lengths up to 2^32 - 1 (0xFFFFFFFF)
+/// For lengths up to 2^32 - 1 (u32::MAX)
 fn write_u32_size(writer: &mut impl Write, len: u32) -> io::Result<()> {
     /// Indicates that a u32 follows
     const FIRST_BYTE: u8 = 0x80;
@@ -176,15 +176,15 @@ fn write_u32_size(writer: &mut impl Write, len: u32) -> io::Result<()> {
 /// Write an encoded integer string
 fn write_string_int(writer: &mut impl Write, val: i64) -> io::Result<()> {
     match val {
-        val if val <= 0x7F => {
+        val if val >= i8::MIN as i64 && val <= i8::MAX as i64 => {
             writer.write_u8(constants::STRING_I8_FLAG)?;
             writer.write_i8(val as i8)?;
         }
-        val if val <= 0x7FFF => {
+        val if val >= i16::MIN as i64 && val <= i16::MAX as i64 => {
             writer.write_u8(constants::STRING_I16_FLAG)?;
             writer.write_i16::<LittleEndian>(val as i16)?;
         }
-        val if val <= 0x7FFFFFFF => {
+        val if val >= i32::MIN as i64 && val <= i32::MAX as i64 => {
             writer.write_u8(constants::STRING_I32_FLAG)?;
             writer.write_i32::<LittleEndian>(val as i32)?;
         }
@@ -197,7 +197,7 @@ fn write_string_int(writer: &mut impl Write, val: i64) -> io::Result<()> {
 mod tests {
     use bytes::Buf;
 
-    use crate::storage::rdb::parser::RdbParser;
+    use super::super::parser::RdbParser;
 
     use super::*;
 
@@ -236,11 +236,15 @@ mod tests {
     fn string_int() -> io::Result<()> {
         let mut buf = Vec::new();
         write_string_int(&mut buf, 12345)?;
-        assert_eq!(buf, &[0xC1, 0x39, 0x30]);
+        assert_eq!(buf, &[constants::STRING_I16_FLAG, 0x39, 0x30]);
 
         let mut buf = Vec::new();
         write_string_int(&mut buf, 1234567)?;
-        assert_eq!(buf, &[0xC2, 0x87, 0xD6, 0x12, 0x00]);
+        assert_eq!(buf, &[constants::STRING_I32_FLAG, 0x87, 0xD6, 0x12, 0x00]);
+
+        let mut buf = Vec::new();
+        write_string_int(&mut buf, -12345)?;
+        assert_eq!(buf, &[constants::STRING_I16_FLAG, 0xc7, 0xcf]);
 
         Ok(())
     }
