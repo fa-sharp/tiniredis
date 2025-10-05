@@ -3,10 +3,7 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::{
-    queues::Queues,
-    storage::stream::{StreamKeyAndEntries, StreamStorage},
-};
+use crate::storage::stream::{StreamKeyAndEntries, StreamStorage};
 
 /// A blocking xread client waiting for an added stream value
 #[derive(Debug)]
@@ -19,7 +16,7 @@ pub struct XReadClient {
 /// events via a channel.
 pub async fn xread_task(
     storage: Arc<Mutex<impl StreamStorage>>,
-    queues: Arc<Queues>,
+    queues: Arc<super::Queues>,
     mut xadd_rx: mpsc::UnboundedReceiver<Bytes>,
     mut shutdown: watch::Receiver<bool>,
 ) {

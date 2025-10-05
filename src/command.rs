@@ -7,8 +7,6 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     arguments::Arguments,
-    notifiers::Notifiers,
-    queues::Queues,
     server::Config,
     storage::{
         geo::GeoStorage,
@@ -18,6 +16,7 @@ use crate::{
         stream::StreamStorage,
         Storage,
     },
+    tasks::{Notifiers, Queues},
 };
 
 mod executor;

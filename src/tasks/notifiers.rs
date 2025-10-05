@@ -1,17 +1,25 @@
+use std::sync::Arc;
+
 use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 
-use crate::tasks::PubSubEvent;
+use super::{counters::ChangeCounter, pubsub::PubSubEvent};
 
-/// Holds the notifiers/senders for various events
+/// Holds the senders and counters to notify tasks of certain events
 pub struct Notifiers {
-    pub bpop: mpsc::UnboundedSender<Bytes>,
-    pub xread: mpsc::UnboundedSender<Bytes>,
-    pub pubsub: mpsc::UnboundedSender<PubSubEvent>,
+    pub(super) bpop: mpsc::UnboundedSender<Bytes>,
+    pub(super) xread: mpsc::UnboundedSender<Bytes>,
+    pub(super) pubsub: mpsc::UnboundedSender<PubSubEvent>,
+    pub(super) counters: Arc<ChangeCounter>,
 }
 
 impl Notifiers {
+    /// Increment the data change counter
+    pub fn change_incr(&self, count: i64) {
+        self.counters.incr(count as usize);
+    }
+
     /// Notify blocking pop task that a list was pushed
     pub fn bpop_notify(&self, list_key: Bytes) {
         if self.bpop.send(list_key).is_err() {

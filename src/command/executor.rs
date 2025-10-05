@@ -6,10 +6,7 @@ use tinikeyval_protocol::{constants, RespValue};
 use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 
-use super::{Command, CommandResponse};
 use crate::{
-    notifiers::Notifiers,
-    queues::Queues,
     server::Config,
     storage::{
         geo::GeoStorage,
@@ -19,10 +16,12 @@ use crate::{
         stream::{StreamEntry, StreamStorage},
         Storage,
     },
-    tasks::{BPopClient, XReadClient},
+    tasks::{Notifiers, Queues},
 };
 
-/// Execute the command, and format the response into [`RedisValue`] (RESP format)
+use super::{Command, CommandResponse};
+
+/// Execute the command, and format the response into [`RespValue`] (RESP format)
 pub fn execute_command(
     command: Command,
     storage: &mut (impl Storage
@@ -41,13 +40,15 @@ pub fn execute_command(
         Command::Echo { message } => RespValue::String(message).into(),
         Command::DbSize => RespValue::Int(storage.size()).into(),
         Command::FlushDb => {
+            let size = storage.size();
             storage.flush();
+            notifiers.change_incr(size);
             constants::OK.into()
         }
         Command::ConfigGet { param } => {
             let value = match param.as_ref() {
-                b"dir" => Bytes::from(config.rdb_dir.clone().unwrap_or_default()),
-                b"dbfilename" => Bytes::from(config.rdb_filename.clone().unwrap_or_default()),
+                b"dir" => Bytes::copy_from_slice(config.rdb_dir.as_bytes()),
+                b"dbfilename" => Bytes::copy_from_slice(config.rdb_filename.as_bytes()),
                 _ => Err(Bytes::from("ERR unrecognized parameter"))?,
             };
 
@@ -64,6 +65,7 @@ pub fn execute_command(
         },
         Command::Set { key, val, ttl } => {
             storage.set(key, val, ttl);
+            notifiers.change_incr(1);
             constants::OK.into()
         }
         Command::Type { key } => RespValue::SimpleString(storage.kind(&key)).into(),
@@ -75,19 +77,26 @@ pub fn execute_command(
                     count += 1;
                 }
             }
+            notifiers.change_incr(count);
             RespValue::Int(count).into()
         }
-        Command::Incr { key } => RespValue::Int(storage.incr(key)?).into(),
+        Command::Incr { key } => {
+            let incr = storage.incr(key)?;
+            notifiers.change_incr(1);
+            RespValue::Int(incr).into()
+        }
         Command::Keys { .. } => {
             RespValue::Array(storage.keys().into_iter().map(RespValue::String).collect()).into()
         }
         Command::Push { key, elems, dir } => {
             let len = storage.push(key.clone(), elems, dir)?;
+            notifiers.change_incr(1);
             notifiers.bpop_notify(key); // notify blocking POP task
             RespValue::Int(len).into()
         }
         Command::Pop { key, dir, count } => match storage.pop(&key, dir, count) {
             Some(mut elems) => {
+                notifiers.change_incr(1);
                 if count == 1 {
                     RespValue::String(elems.pop().expect("should have 1 item")).into()
                 } else {
@@ -102,6 +111,7 @@ pub fn execute_command(
             timeout_millis,
         } => {
             if let Some(mut elems) = storage.pop(&key, dir, 1) {
+                notifiers.change_incr(1);
                 RespValue::Array(vec![
                     RespValue::String(key),
                     RespValue::String(elems.pop().expect("should have 1 item")),
@@ -110,7 +120,7 @@ pub fn execute_command(
             } else {
                 let key_response = key.clone();
                 let (tx, rx) = oneshot::channel();
-                queues.bpop_push(BPopClient { key, dir, tx });
+                queues.bpop_push(key, dir, tx);
                 let block_response = if timeout_millis == 0 {
                     rx.map_ok(|bytes| {
                         Ok(RespValue::Array(vec![
@@ -139,8 +149,20 @@ pub fn execute_command(
             let elems = storage.lrange(&key, start, stop);
             RespValue::Array(elems.into_iter().map(RespValue::String).collect()).into()
         }
-        Command::SAdd { key, members } => RespValue::Int(storage.sadd(key, members)?).into(),
-        Command::SRem { key, members } => RespValue::Int(storage.srem(&key, members)?).into(),
+        Command::SAdd { key, members } => {
+            let num = storage.sadd(key, members)?;
+            if num > 0 {
+                notifiers.change_incr(1);
+            }
+            RespValue::Int(num).into()
+        }
+        Command::SRem { key, members } => {
+            let num = storage.srem(&key, members)?;
+            if num > 0 {
+                notifiers.change_incr(1);
+            }
+            RespValue::Int(num).into()
+        }
         Command::SCard { key } => RespValue::Int(storage.scard(&key)?).into(),
         Command::SMembers { key } => {
             let members = storage.smembers(&key)?;
@@ -150,7 +172,13 @@ pub fn execute_command(
             true => RespValue::Int(1).into(),
             false => RespValue::Int(0).into(),
         },
-        Command::ZAdd { key, members } => RespValue::Int(storage.zadd(key, members)?).into(),
+        Command::ZAdd { key, members } => {
+            let num = storage.zadd(key, members)?;
+            if num > 0 {
+                notifiers.change_incr(1);
+            }
+            RespValue::Int(num).into()
+        }
         Command::ZRank { key, member } => match storage.zrank(&key, member)? {
             Some(rank) => RespValue::Int(rank).into(),
             None => RespValue::NilString.into(),
@@ -164,8 +192,20 @@ pub fn execute_command(
             let members = storage.zrange(&key, start, stop)?;
             RespValue::Array(members.into_iter().map(RespValue::String).collect()).into()
         }
-        Command::ZRem { key, members } => RespValue::Int(storage.zrem(&key, members)?).into(),
-        Command::GeoAdd { key, members } => RespValue::Int(storage.geoadd(key, members)?).into(),
+        Command::ZRem { key, members } => {
+            let num = storage.zrem(&key, members)?;
+            if num > 0 {
+                notifiers.change_incr(1);
+            }
+            RespValue::Int(num).into()
+        }
+        Command::GeoAdd { key, members } => {
+            let num = storage.geoadd(key, members)?;
+            if num > 0 {
+                notifiers.change_incr(1);
+            }
+            RespValue::Int(num).into()
+        }
         Command::GeoPos { key, members } => {
             let member_coords = storage.geopos(&key, members)?;
             let values = member_coords
@@ -194,6 +234,7 @@ pub fn execute_command(
         }
         Command::XAdd { key, id, data } => {
             let id = storage.xadd(key.clone(), id, data)?;
+            notifiers.change_incr(1);
             notifiers.xread_notify(key); // notify blocking XREAD task
             RespValue::String(format_stream_id(id)).into()
         }
@@ -208,13 +249,13 @@ pub fn execute_command(
                 RespValue::Array(response.into_iter().map(format_stream).collect()).into()
             } else if let Some(block_millis) = block {
                 let (tx, rx) = oneshot::channel();
-                queues.xread_push(XReadClient {
-                    streams: parsed_streams
+                queues.xread_push(
+                    parsed_streams
                         .into_iter()
                         .map(|(key, id)| (key, format_stream_id(id)))
                         .collect(),
-                    tx: Some(tx),
-                });
+                    tx,
+                );
                 let block_response = if block_millis == 0 {
                     rx.map_ok(|res| {
                         res.map(|streams| {

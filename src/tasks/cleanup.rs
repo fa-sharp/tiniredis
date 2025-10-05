@@ -5,7 +5,9 @@ use std::{
 
 use tracing::debug;
 
-use crate::{queues::Queues, storage::Storage};
+use crate::storage::Storage;
+
+use super::Queues;
 
 /// Task to periodically cleanup expired keys and disconnected blocking clients
 pub async fn cleanup_task(

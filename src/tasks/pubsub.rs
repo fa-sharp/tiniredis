@@ -5,7 +5,7 @@ use tinikeyval_protocol::RespValue;
 use tokio::sync::{mpsc, oneshot, watch};
 use tracing::{debug, warn};
 
-use crate::queues::Queues;
+use super::Queues;
 
 /// A pubsub client subscribed to one or more channels
 #[derive(Debug)]

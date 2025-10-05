@@ -3,10 +3,9 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::{
-    queues::Queues,
-    storage::list::{ListDirection, ListStorage},
-};
+use crate::storage::list::{ListDirection, ListStorage};
+
+use super::Queues;
 
 /// A blocking pop client waiting for a value
 #[derive(Debug)]

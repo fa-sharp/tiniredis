@@ -14,10 +14,9 @@ use tracing::{debug, info};
 
 use crate::{
     command::{Command, CommandResponse},
-    notifiers::Notifiers,
     pubsub,
-    queues::Queues,
     storage::MemoryStorage,
+    tasks::{Notifiers, Queues},
     transaction::process_transaction,
 };
 

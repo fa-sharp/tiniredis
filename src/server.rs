@@ -10,26 +10,20 @@ use std::{
 
 use anyhow::Context;
 use bytes::Bytes;
-use tokio::{
-    net::TcpListener,
-    sync::mpsc,
-    task::{spawn_blocking, JoinSet},
-};
+use tokio::{net::TcpListener, task::spawn_blocking};
 use tracing::{debug, info, warn};
 
 use crate::{
-    notifiers::Notifiers,
-    queues::Queues,
     storage::{rdb, MemoryStorage, Storage},
-    tasks,
+    tasks::{spawn_server_tasks, Notifiers, Queues},
 };
 
 /// Server config
 #[derive(Debug, Default)]
 pub struct Config {
     pub auth: Option<Bytes>,
-    pub rdb_dir: Option<String>,
-    pub rdb_filename: Option<String>,
+    pub rdb_dir: String,
+    pub rdb_filename: String,
     pub rdb_path: PathBuf,
 }
 
@@ -50,7 +44,7 @@ pub async fn start_server(config: Config) -> anyhow::Result<()> {
     // Configuration
     let config = Arc::new(config);
 
-    // Setup and load storage
+    // Setup and load storage from RDB file
     let rdb_file_path = config.rdb_path.to_owned();
     let storage = match spawn_blocking(move || rdb::load_rdb_file(&rdb_file_path)).await {
         Ok(Ok(storage)) => {
@@ -64,49 +58,9 @@ pub async fn start_server(config: Config) -> anyhow::Result<()> {
         Err(err) => panic!("Database read task panicked: {err}"),
     };
 
-    // Setup channels
-    let (bpop_tx, bpop_rx) = mpsc::unbounded_channel();
-    let (xread_tx, xread_rx) = mpsc::unbounded_channel();
-    let (pubsub_tx, pubsub_rx) = mpsc::unbounded_channel();
-
-    // Setup queues and notifiers
-    let queues: Arc<Queues> = Arc::default();
-    let notifiers: Arc<Notifiers> = Arc::new(Notifiers {
-        bpop: bpop_tx,
-        xread: xread_tx,
-        pubsub: pubsub_tx,
-    });
-
     // Spawn all tasks
-    let mut all_tasks = JoinSet::new();
     let mut shutdown_sig = shutdown::setup_shutdown_signal();
-    all_tasks.spawn(tasks::bpop_task(
-        Arc::clone(&storage),
-        Arc::clone(&queues),
-        bpop_rx,
-        shutdown_sig.clone(),
-    ));
-    all_tasks.spawn(tasks::xread_task(
-        Arc::clone(&storage),
-        Arc::clone(&queues),
-        xread_rx,
-        shutdown_sig.clone(),
-    ));
-    all_tasks.spawn(tasks::pubsub_task(
-        Arc::clone(&queues),
-        pubsub_rx,
-        shutdown_sig.clone(),
-    ));
-    all_tasks.spawn(tasks::cleanup_task(
-        Arc::clone(&storage),
-        Arc::clone(&queues),
-        shutdown_sig.clone(),
-    ));
-    all_tasks.spawn(tasks::persist_task(
-        Arc::clone(&storage),
-        config.rdb_path.clone(),
-        shutdown_sig.clone(),
-    ));
+    let (all_tasks, queues, notifiers) = spawn_server_tasks(&storage, &config, &shutdown_sig);
 
     // Start server
     let host_var = env::var("HOST");
