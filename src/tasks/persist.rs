@@ -33,8 +33,9 @@ pub async fn persist_task(
             _ = shutdown.changed() => break
         };
 
-        if counter.load() >= 5 && Instant::now().duration_since(last_save).as_secs() > 10 {
-            info!("5 changes and >10 seconds since last save. Saving database snapshot...");
+        let (secs, changes) = config.persist;
+        if counter.load() >= changes && Instant::now().duration_since(last_save).as_secs() > secs {
+            info!("{changes} changes and >{secs} seconds since last save. Saving database snapshot...");
             counter.reset();
             last_save = Instant::now();
         } else {

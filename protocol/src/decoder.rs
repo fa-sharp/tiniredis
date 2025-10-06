@@ -20,10 +20,10 @@ impl Decoder for RespCodec {
         );
 
         match data::parse(buf, 0)? {
-            Some((window, next_pos)) => {
+            Some((value_ref, next_pos)) => {
                 // Value parsed successfully, split buffer and take bytes
                 let data = buf.split_to(next_pos);
-                Ok(Some(window.extract_redis_value(&data.freeze())?))
+                Ok(Some(value_ref.extract_redis_value(&data.freeze())?))
             }
             None => Ok(None),
         }

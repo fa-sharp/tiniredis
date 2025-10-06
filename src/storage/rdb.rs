@@ -41,14 +41,16 @@ pub struct RdbDatabase {
 /// when calling from async code.
 pub fn load_rdb_file(file_path: &Path) -> anyhow::Result<MemoryStorage> {
     // Read and parse RDB file
+    let start = Instant::now();
     let file = File::open(file_path).context("File not found")?;
     let reader = BufReader::new(file);
     let rdb = parser::RdbParser::new(reader)
         .parse()
         .context("Failed to parse RDB file")?;
 
+    let read_ms = Instant::now().duration_since(start).as_micros() as f64 / 1000.0;
     debug!(
-        "Parsed RDB file from {file_path:?}. Version: {:?}, Checksum: {}, Metadata: {:?}",
+        "Parsed RDB file from {file_path:?} in {read_ms} ms. Version: {:?}, Checksum: {}, Metadata: {:?}",
         rdb.version, rdb.checksum, rdb.metadata
     );
 
@@ -91,7 +93,7 @@ pub fn load_rdb_file(file_path: &Path) -> anyhow::Result<MemoryStorage> {
 pub fn save_rdb_file(storage: &Mutex<MemoryStorage>, file_path: &Path) -> anyhow::Result<()> {
     let mut temp_file = NamedTempFile::new().context("create temp file")?;
     let rdb_writer = writer::RdbWriter::new(&mut temp_file);
-    let start_time = Instant::now();
+    let start = Instant::now();
     {
         let storage_lock = storage.lock().unwrap();
         let current_keys = storage_lock
@@ -103,9 +105,7 @@ pub fn save_rdb_file(storage: &Mutex<MemoryStorage>, file_path: &Path) -> anyhow
     }
     temp_file.persist(file_path).context("save RDB file")?;
 
-    debug!(
-        "Saved database snapshot to {file_path:?} in {} ms",
-        Instant::now().duration_since(start_time).as_micros() as f64 / 1000.0
-    );
+    let write_ms = Instant::now().duration_since(start).as_micros() as f64 / 1000.0;
+    debug!("Saved database snapshot to {file_path:?} in {write_ms} ms",);
     Ok(())
 }

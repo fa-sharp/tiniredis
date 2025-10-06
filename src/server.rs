@@ -25,6 +25,7 @@ pub struct Config {
     pub rdb_dir: String,
     pub rdb_filename: String,
     pub rdb_path: PathBuf,
+    pub persist: (u64, usize),
 }
 
 /// Setup the server and start listening for connections
@@ -37,7 +38,7 @@ pub async fn start_server(config: Config) -> anyhow::Result<()> {
 
     #[cfg(not(debug_assertions))]
     tracing_subscriber::fmt()
-        .event_format(tracing_subscriber::fmt::format::json())
+        .event_format(tracing_subscriber::fmt::format::json().flatten_event(true))
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 

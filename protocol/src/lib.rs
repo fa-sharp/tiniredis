@@ -20,7 +20,7 @@ use tokio_util::codec::Framed;
 #[derive(Debug)]
 pub struct RespCodec;
 impl RespCodec {
-    /// Create a RESP framed I/O interface from on AsyncRead + AsyncWrite resource
+    /// Create a RESP framed I/O interface from an AsyncRead + AsyncWrite resource
     pub fn framed_io<Rw>(inner: Rw) -> Framed<Rw, RespCodec>
     where
         Rw: AsyncRead + AsyncWrite,
@@ -69,7 +69,7 @@ impl RespValue {
 }
 
 impl RespValueRef {
-    /// Get the underlying Redis value that this window is pointing at
+    /// Get the underlying Redis value
     fn extract_redis_value(self, buf: &Bytes) -> Result<RespValue, RedisParseError> {
         Ok(match self {
             RespValueRef::String(window) => RespValue::String(window.as_bytes(buf)),

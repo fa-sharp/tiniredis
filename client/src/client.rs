@@ -227,6 +227,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn big_pipeline() -> ClientResult<()> {
+        let client = Client::connect(LOCALHOST).await?;
+        let commands = (1..=10_000)
+            .map(|i| vec!["SET".to_owned(), format!("foo{i}"), format!("bar{i}")])
+            .collect();
+        let responses = client.pipeline(commands).await?;
+        assert_eq!(responses.len(), 10_000);
+
+        assert_eq!(client.send(vec!["PING"]).await?, PONG);
+        assert_eq!(client.send(vec!["DBSIZE"]).await?, Value::Int(10_000));
+        assert_eq!(
+            client.send(vec!["GET", "foo1"]).await?,
+            Value::String("bar1".into())
+        );
+        assert_eq!(
+            client.send(vec!["GET", "foo10000"]).await?,
+            Value::String("bar10000".into())
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn join_responses() -> ClientResult<()> {
         let client = Client::connect(LOCALHOST).await?;
         let results = try_join_all(vec![
