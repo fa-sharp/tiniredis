@@ -71,13 +71,12 @@ impl<W: Write> RdbWriter<W> {
         write_size(&mut self.file, db_idx)?;
 
         // Write database sizes
-        // For now, we only count and save string keys
         let (db_size, expire_size) =
             keys.iter()
                 .fold((0, 0), |(mut db_size, mut expire_size), (_, obj)| {
-                    if obj.is_string() {
+                    if obj.is_persist_supported() {
                         db_size += 1;
-                        if obj.ttl_millis.is_some() {
+                        if obj.expiration.is_some() {
                             expire_size += 1;
                         }
                     }
@@ -87,7 +86,7 @@ impl<W: Write> RdbWriter<W> {
         write_size(&mut self.file, db_size)?;
         write_size(&mut self.file, expire_size)?;
 
-        // Write keys and values with expiration times
+        // Write database keys
         let mut db_size_check = 0;
         let mut expire_size_check = 0;
         let unix_time_millis = SystemTime::now()
@@ -96,26 +95,46 @@ impl<W: Write> RdbWriter<W> {
             .as_millis() as u64;
 
         for (key, object) in keys {
-            let value = match &object.data {
-                RedisDataType::String(val) => val,
-                _ => continue, // TODO skipping other data types for now
-            };
-            let expires_at = object
-                .ttl_millis
-                .and_then(|ttl_millis| {
-                    let age_millis =
-                        Instant::now().duration_since(object.created).as_millis() as u64;
-                    ttl_millis.checked_sub(age_millis)
-                })
-                .map(|expires_in_millis| unix_time_millis + expires_in_millis);
+            // Write expiration time (Unix epoch time millis)
+            let expires_at = object.expiration.map(|expiration| {
+                let expires_in_millis = (expiration - Instant::now()).as_millis() as u64;
+                unix_time_millis + expires_in_millis
+            });
             if let Some(expires_at) = expires_at {
                 self.file.write_u8(constants::EXPIRY_U64_FLAG)?;
                 self.file.write_u64::<LittleEndian>(expires_at)?;
                 expire_size_check += 1;
             }
-            self.file.write_u8(constants::TYPE_STRING_FLAG)?;
+
+            // Write type flag
+            let type_flag = match &object.data {
+                RedisDataType::String(_) => constants::TYPE_STRING_FLAG,
+                RedisDataType::List(_) => constants::TYPE_LIST_FLAG,
+                RedisDataType::Set(_) => constants::TYPE_SET_FLAG,
+                _ => todo!("data type not supported yet"),
+            };
+            self.file.write_u8(type_flag)?;
+
+            // Write key and value
             write_string(&mut self.file, key)?;
-            write_string(&mut self.file, value)?;
+            match &object.data {
+                RedisDataType::String(value) => {
+                    write_string(&mut self.file, value)?;
+                }
+                RedisDataType::List(list) => {
+                    write_size(&mut self.file, list.len())?;
+                    for member in list {
+                        write_string(&mut self.file, member)?;
+                    }
+                }
+                RedisDataType::Set(set) => {
+                    write_size(&mut self.file, set.len())?;
+                    for member in set {
+                        write_string(&mut self.file, member)?;
+                    }
+                }
+                _ => todo!("data type not supported"),
+            };
             db_size_check += 1;
         }
 
@@ -196,6 +215,8 @@ fn write_string_int(writer: &mut impl Write, val: i64) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+
     use bytes::Buf;
 
     use super::super::parser::RdbParser;
@@ -259,8 +280,10 @@ mod tests {
         let bar_key = Bytes::from("bar");
         let bar_val = Bytes::from("baz");
         let bar_exp = 5000;
-        let bar_obj =
-            RedisObject::new_with_ttl(RedisDataType::String(bar_val.clone()), Some(bar_exp));
+        let bar_obj = RedisObject::new_with_ttl(
+            RedisDataType::List(VecDeque::from([foo_val.clone(), bar_val.clone()])),
+            Some(bar_exp),
+        );
 
         let keys = vec![(&foo_key, &foo_obj), (&bar_key, &bar_obj)];
         let mut buf = Vec::new();
@@ -277,17 +300,16 @@ mod tests {
         assert_eq!(rdb.metadata[0], version_meta);
         assert_eq!(rdb.metadata[1].0, Bytes::from("ctime"));
 
-        let keys = rdb.databases[0].keys.clone();
-        assert_eq!(keys[0], (foo_key, foo_val, None));
+        let keys = &rdb.databases[0].keys;
+        assert_eq!(keys[0].0, foo_key);
+        assert_eq!(keys[0].1.data, RedisDataType::String(foo_val.clone()));
 
-        let bar_exp_time = bar_exp
-            + SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64;
         assert_eq!(keys[1].0, bar_key);
-        assert_eq!(keys[1].1, bar_val);
-        assert!(keys[1].2.unwrap() >= bar_exp_time && keys[1].2.unwrap() <= bar_exp_time + 5);
+        assert_eq!(
+            keys[1].1.data,
+            RedisDataType::List(VecDeque::from([foo_val, bar_val]))
+        );
+        assert!(keys[1].1.expiration.is_some());
 
         Ok(())
     }

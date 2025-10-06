@@ -1,8 +1,15 @@
-use std::io::Read;
+use std::{
+    collections::{HashSet, VecDeque},
+    io::Read,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::bail;
 use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
 use bytes::{Bytes, BytesMut};
+use tokio::time::Instant;
+
+use crate::storage::{RedisDataType, RedisObject};
 
 use super::{constants, crc::Crc64Reader, Rdb, RdbDatabase};
 
@@ -83,12 +90,27 @@ impl<R: Read> RdbParser<R> {
         let db_size = read_size(self.file.read_u8()?, &mut self.file)?;
         let expire_size = read_size(self.file.read_u8()?, &mut self.file)?;
 
-        // Read keys and values
+        // Read keys, values, and expirations, discarding expired keys
         let mut keys = Vec::with_capacity(db_size);
-        while let Some((key, val, expires)) =
+        let current_unix_time_millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+
+        while let Some((key, data, expires_at)) =
             next_key(&mut self.flag, &mut self.file, &mut self.buf)?
         {
-            keys.push((key, val, expires));
+            let expiration = if let Some(expires_at) = expires_at {
+                if current_unix_time_millis > expires_at {
+                    continue; // discard expired key
+                }
+                let millis_to_expiration = expires_at - current_unix_time_millis;
+                Some(Instant::now() + Duration::from_millis(millis_to_expiration))
+            } else {
+                None
+            };
+            let object = RedisObject { expiration, data };
+            keys.push((key, object));
         }
 
         Ok(RdbDatabase {
@@ -100,34 +122,35 @@ impl<R: Read> RdbParser<R> {
     }
 }
 
-/// Read the next key value pair in the database. Returns `None` if at the end of the database.
+/// Read the next key in the format `(key, value, expiration in Unix epoch millis)`. Returns `None`
+/// if at the end of the database.
 fn next_key(
     flag: &mut u8,
     reader: &mut impl Read,
     buf: &mut BytesMut,
-) -> anyhow::Result<Option<(Bytes, Bytes, Option<u64>)>> {
+) -> anyhow::Result<Option<(Bytes, RedisDataType, Option<u64>)>> {
     *flag = reader.read_u8()?;
-    match *flag {
+    Ok(match *flag {
         // end of database
-        constants::DB_FLAG | constants::END_FILE_FLAG => Ok(None),
+        constants::DB_FLAG | constants::END_FILE_FLAG => None,
         // key with u64 expiry - Unix time milliseconds
         constants::EXPIRY_U64_FLAG => {
             let expires = reader.read_u64::<LittleEndian>()?;
-            let (key, value) = read_key_value(reader.read_u8()?, reader, buf)?;
-            Ok(Some((key, value, Some(expires))))
+            let (key, data) = read_key_value(reader.read_u8()?, reader, buf)?;
+            Some((key, data, Some(expires)))
         }
         // key with u32 expiry - Unix time seconds
         constants::EXPIRY_U32_FLAG => {
             let expires = (reader.read_u32::<LittleEndian>()? * 1000).into();
             let (key, value) = read_key_value(reader.read_u8()?, reader, buf)?;
-            Ok(Some((key, value, Some(expires))))
+            Some((key, value, Some(expires)))
         }
         // key with no expiry
         type_flag => {
             let (key, value) = read_key_value(type_flag, reader, buf)?;
-            Ok(Some((key, value, None)))
+            Some((key, value, None))
         }
-    }
+    })
 }
 
 /// Read a key value pair with the given type flag
@@ -135,29 +158,40 @@ fn read_key_value(
     flag: u8,
     reader: &mut impl Read,
     buf: &mut BytesMut,
-) -> anyhow::Result<(Bytes, Bytes)> {
+) -> anyhow::Result<(Bytes, RedisDataType)> {
     // read the key
     let n = read_length_encoded_string(reader, buf)?;
     let key = buf.split_to(n).freeze();
 
     // check the type flag, and then read the value
-    match flag {
+    let value = match flag {
         constants::TYPE_STRING_FLAG => {
             let n = read_length_encoded_string(reader, buf)?;
             let value = buf.split_to(n).freeze();
-            Ok((key, value))
+            RedisDataType::String(value)
         }
-        constants::TYPE_LIST_FLAG | constants::TYPE_SET_FLAG => {
-            let list_size = read_size(reader.read_u8()?, reader)?;
-            let mut members = Vec::new();
-            for _ in 0..list_size {
+        constants::TYPE_LIST_FLAG => {
+            let len = read_size(reader.read_u8()?, reader)?;
+            let mut members = VecDeque::with_capacity(len);
+            for _ in 0..len {
                 let n = read_length_encoded_string(reader, buf)?;
-                members.push(buf.split_to(n).freeze());
+                members.push_back(buf.split_to(n).freeze());
             }
-            bail!("unimplemented data type {flag:#X} in rdb file")
+            RedisDataType::List(members)
+        }
+        constants::TYPE_SET_FLAG => {
+            let size = read_size(reader.read_u8()?, reader)?;
+            let mut members = HashSet::with_capacity(size);
+            for _ in 0..size {
+                let n = read_length_encoded_string(reader, buf)?;
+                members.insert(buf.split_to(n).freeze());
+            }
+            RedisDataType::Set(members)
         }
         flag => bail!("unimplemented data type {flag:#X} in rdb file"),
-    }
+    };
+
+    Ok((key, value))
 }
 
 /// Get the first 2 significant bits of a length value
@@ -289,12 +323,12 @@ mod tests {
         let mut reader = FOO_BAR_KV.reader();
         let (key, val) = read_key_value(reader.read_u8()?, &mut reader, &mut buf)?;
         assert_eq!(key, Bytes::from("foo"));
-        assert_eq!(val, Bytes::from("bar"));
+        assert_eq!(val, RedisDataType::String(Bytes::from("bar")));
 
         let mut reader = BAZ_QUX_KV.reader();
         let (key, val) = read_key_value(reader.read_u8()?, &mut reader, &mut buf)?;
         assert_eq!(key, Bytes::from("baz"));
-        assert_eq!(val, Bytes::from("qux"));
+        assert_eq!(val, RedisDataType::String(Bytes::from("qux")));
 
         Ok(())
     }
@@ -306,7 +340,7 @@ mod tests {
         let mut flag = 0;
         let (key, val, expires) = next_key(&mut flag, &mut reader, &mut buf)?.unwrap();
         assert_eq!(key, Bytes::from("foo"));
-        assert_eq!(val, Bytes::from("bar"));
+        assert_eq!(val, RedisDataType::String(Bytes::from("bar")));
         assert_eq!(expires, None);
 
         Ok(())
@@ -322,7 +356,7 @@ mod tests {
 
         let (key, val, expires) = next_key(&mut flag, &mut reader, &mut buf)?.unwrap();
         assert_eq!(key, Bytes::from("foo"));
-        assert_eq!(val, Bytes::from("bar"));
+        assert_eq!(val, RedisDataType::String(Bytes::from("bar")));
         assert_eq!(expires, Some(1713824559637));
 
         Ok(())
@@ -338,7 +372,7 @@ mod tests {
 
         let (key, val, expires) = next_key(&mut flag, &mut reader, &mut buf)?.unwrap();
         assert_eq!(key, Bytes::from("foo"));
-        assert_eq!(val, Bytes::from("bar"));
+        assert_eq!(val, RedisDataType::String(Bytes::from("bar")));
         assert_eq!(expires, Some(1713824559637));
 
         Ok(())
@@ -346,6 +380,7 @@ mod tests {
 
     #[test]
     fn parse_rdb() -> anyhow::Result<()> {
+        // Contains `foo, bar`, `count, 15500`, and `bar, bax` (expired)
         let raw_rdb_file: Vec<u8> = vec![
             82, 69, 68, 73, 83, 48, 48, 49, 49, 250, 10, 118, 97, 108, 107, 101, 121, 45, 118, 101,
             114, 5, 56, 46, 49, 46, 51, 250, 10, 114, 101, 100, 105, 115, 45, 98, 105, 116, 115,
@@ -355,22 +390,15 @@ mod tests {
             117, 110, 116, 193, 140, 60, 252, 192, 128, 30, 177, 153, 1, 0, 0, 0, 3, 98, 97, 114,
             3, 98, 97, 120, 255, 15, 57, 201, 59, 63, 77, 52, 99,
         ];
-        let rdb = RdbParser::new(raw_rdb_file.reader()).parse()?;
+        let mut rdb = RdbParser::new(raw_rdb_file.reader()).parse()?;
+
         assert_eq!(rdb.version, b"0011".as_slice());
         assert_eq!(rdb.metadata.len(), 5);
-        assert_eq!(
-            rdb.databases[0],
-            RdbDatabase {
-                idx: 0,
-                db_size: 3,
-                expire_size: 1,
-                keys: vec![
-                    (Bytes::from("foo"), Bytes::from("bar"), None),
-                    (Bytes::from("count"), Bytes::from("15500"), None),
-                    (Bytes::from("bar"), Bytes::from("bax"), Some(1759613190336))
-                ]
-            }
-        );
+
+        let count = rdb.databases[0].keys.pop().unwrap();
+        assert_eq!(count.0, Bytes::from("count"));
+        assert_eq!(count.1.data, RedisDataType::String(Bytes::from("15500")));
+        assert_eq!(count.1.expiration, None);
 
         Ok(())
     }

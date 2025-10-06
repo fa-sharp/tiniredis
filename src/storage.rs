@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    time::Duration,
+};
 
 use bytes::Bytes;
 use tokio::time::Instant;
@@ -24,16 +27,12 @@ pub struct MemoryStorage {
 /// Redis object stored in memory
 #[derive(Debug)]
 pub struct RedisObject {
-    /// Instant when object was created
-    created: Instant,
-    /// TTL in milliseconds
-    ttl_millis: Option<u64>,
-    /// The data of the object
+    expiration: Option<Instant>,
     data: RedisDataType,
 }
 
 /// Contains the data of the object stored in memory
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum RedisDataType {
     String(Bytes),
     List(VecDeque<Bytes>),
@@ -79,8 +78,7 @@ impl MemoryStorage {
 impl RedisObject {
     pub fn new(data: RedisDataType) -> Self {
         Self {
-            created: Instant::now(),
-            ttl_millis: None,
+            expiration: None,
             data,
         }
     }
@@ -99,21 +97,23 @@ impl RedisObject {
 
     pub fn new_with_ttl(data: RedisDataType, ttl_millis: Option<u64>) -> Self {
         Self {
-            created: Instant::now(),
-            ttl_millis,
+            expiration: ttl_millis.map(|ttl| (Instant::now() + Duration::from_millis(ttl))),
             data,
         }
     }
 
     fn is_current(&self) -> bool {
-        if let Some(ttl) = self.ttl_millis {
-            Instant::now().duration_since(self.created).as_millis() <= ttl.into()
+        if let Some(expiration) = self.expiration {
+            Instant::now() <= expiration
         } else {
             true
         }
     }
 
-    fn is_string(&self) -> bool {
-        matches!(self.data, RedisDataType::String(_))
+    fn is_persist_supported(&self) -> bool {
+        matches!(
+            self.data,
+            RedisDataType::String(_) | RedisDataType::List(_) | RedisDataType::Set(_)
+        )
     }
 }

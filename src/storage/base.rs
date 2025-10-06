@@ -45,11 +45,11 @@ impl Storage for MemoryStorage {
 
     fn ttl(&self, key: &Bytes) -> i64 {
         match self.data.get(key).filter(|o| o.is_current()) {
-            Some(obj) => match obj.ttl_millis {
-                Some(ttl) => {
-                    let ttl = ttl as u128 - Instant::now().duration_since(obj.created).as_millis();
-                    (ttl / 1000).try_into().unwrap_or_default()
-                }
+            Some(obj) => match obj.expiration {
+                Some(expiration) => (expiration - Instant::now())
+                    .as_secs()
+                    .try_into()
+                    .unwrap_or_default(),
                 None => -1,
             },
             None => -2,

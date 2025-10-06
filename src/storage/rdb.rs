@@ -1,10 +1,4 @@
-use std::{
-    fs::File,
-    io::BufReader,
-    path::Path,
-    sync::Mutex,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{fs::File, io::BufReader, path::Path, sync::Mutex};
 
 use anyhow::Context;
 use bytes::Bytes;
@@ -28,13 +22,14 @@ pub struct Rdb {
     checksum: u64,
 }
 
-/// Represents a database in the RDB
-#[derive(Debug, PartialEq)]
+/// Represents a database in the RDB file
+#[derive(Debug)]
+#[allow(dead_code, reason = "may use fields in future")]
 pub struct RdbDatabase {
     idx: usize,
     db_size: usize,
     expire_size: usize,
-    keys: Vec<(Bytes, Bytes, Option<u64>)>,
+    keys: Vec<(Bytes, RedisObject)>,
 }
 
 /// Load RDB file into memory. This is a synchronous blocking operation - use `spawn_blocking`
@@ -56,33 +51,8 @@ pub fn load_rdb_file(file_path: &Path) -> anyhow::Result<MemoryStorage> {
 
     // Load keys into storage
     let mut storage = MemoryStorage::default();
-    let unix_time_millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as u64;
-
     for db in rdb.databases.into_iter() {
-        storage.data.reserve(db.db_size);
-        for (key, value, expires_at) in db.keys {
-            // Calculate expiry in milliseconds from now
-            let ttl_millis = if let Some(expires_at) = expires_at {
-                // Skip key if already expired
-                if unix_time_millis > expires_at {
-                    continue;
-                }
-                let millis_from_now = expires_at - unix_time_millis;
-                Some(millis_from_now)
-            } else {
-                None
-            };
-
-            let object = RedisObject {
-                created: Instant::now(),
-                ttl_millis,
-                data: RedisDataType::String(value),
-            };
-            storage.data.insert(key, object);
-        }
+        storage.data.extend(db.keys.into_iter());
     }
 
     Ok(storage)

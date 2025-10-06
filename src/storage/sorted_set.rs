@@ -10,7 +10,7 @@ use super::{MemoryStorage, RedisDataType, RedisObject, StorageResult as Result};
 /// Sorted set storage:
 /// - HashMap of `member -> score`
 /// - BTreeSet of `{ member, score }` items ranked by score
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub struct SortedSet(
     pub(super) HashMap<Bytes, f64>,
     pub(super) BTreeSet<RankedItem>,
